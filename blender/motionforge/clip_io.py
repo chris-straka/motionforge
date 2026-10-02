@@ -133,9 +133,42 @@ def export_action(arm_obj, action, frame_start, frame_end, strip_prefix=False):
     }
 
 
-def import_clip(arm_obj, clip, action_name, frame_start):
-    """Write a clip dict as dense keys on an armature; returns the action.
+def _iter_fcurves(action):
+    """Every fcurve in an action, layered (Blender 5.x) or legacy."""
+    if hasattr(action, "fcurves"):
+        return list(action.fcurves)
+    out = []
+    for layer in action.layers:
+        for strip in layer.strips:
+            for bag in getattr(strip, "channelbags", ()):
+                out.extend(bag.fcurves)
+    return out
 
+
+def _set_linear(action, bone_names):
+    """LINEAR interpolation on the given bones' location/quaternion curves.
+
+    Imported keys are baked samples; the default BEZIER would overshoot
+    between them. Applies to dense and thinned imports alike.
+    """
+    prefix = 'pose.bones["'
+    for fc in _iter_fcurves(action):
+        path = fc.data_path
+        if not path.startswith(prefix):
+            continue
+        name, sep, channel = path[len(prefix) :].partition('"]')
+        if not sep or channel not in (".location", ".rotation_quaternion"):
+            continue
+        if name in bone_names:
+            for key in fc.keyframe_points:
+                key.interpolation = "LINEAR"
+
+
+def import_clip(arm_obj, clip, action_name, frame_start, keys=None):
+    """Write a clip dict as keys on an armature; returns the action.
+
+    keys is None (dense: every frame) or {bone name: [clip frame
+    indices]} for a thinned import (sparse, animator-friendly).
     Clip bones missing from the armature are an error; armature bones
     missing from the clip are left untouched (control rigs survive).
     """
@@ -150,16 +183,30 @@ def import_clip(arm_obj, clip, action_name, frame_start):
             raise MotionforgeError(
                 f"clip bone '{bone['name']}' is not on armature '{arm_obj.name}'"
             )
+    if keys is not None:
+        if keys.get("format", "motionforge-keys") != "motionforge-keys":
+            raise MotionforgeError("not a motionforge-keys document")
+        key_map = keys.get("bones", {})
+        for name in key_map:
+            if name not in arm_obj.pose.bones:
+                raise MotionforgeError(f"keys bone '{name}' is not on '{arm_obj.name}'")
+        for frame_indices in key_map.values():
+            for fi in frame_indices:
+                if not 0 <= fi < len(frames):
+                    raise MotionforgeError(f"keys frame {fi} out of range")
     for pose_bone in arm_obj.pose.bones:
         pose_bone.rotation_mode = "QUATERNION"
     action = bpy.data.actions.new(action_name)
     if arm_obj.animation_data is None:
         arm_obj.animation_data_create()
     arm_obj.animation_data.action = action
+    key_map = keys.get("bones", {}) if keys is not None else None
     for i, frame in enumerate(frames):
         f = frame_start + i
         for bone in skeleton:
             name = bone["name"]
+            if key_map is not None and i not in key_map.get(name, []):
+                continue
             pose = frame.get(name)
             if pose is None:
                 raise MotionforgeError(f"clip frame {i} misses bone '{name}'")
@@ -169,6 +216,7 @@ def import_clip(arm_obj, clip, action_name, frame_start):
             pose_bone.rotation_quaternion = (w, x, y, z)
             pose_bone.keyframe_insert("location", frame=f)
             pose_bone.keyframe_insert("rotation_quaternion", frame=f)
+    _set_linear(action, {b["name"] for b in skeleton})
     bpy.context.view_layer.update()
     return action
 

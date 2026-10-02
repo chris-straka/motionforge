@@ -7,6 +7,7 @@
 
 use motion_core::autopose::{infer, parse_effectors, parse_weights};
 use motion_core::clip::{emit_clip, emit_skeleton, parse_clip, Clip, Frame, Pose};
+use motion_core::limits::{check_limits, parse_limits};
 use motion_core::math::Vec3;
 use motion_core::physics::{physics_fix, PhysicsParams};
 use motion_core::retarget::{parse_bonemap, parse_target_skeleton, retarget, YawMode};
@@ -25,6 +26,7 @@ commands:\n\
   retarget       transfer a source clip onto a target skeleton\n\
   stylize        realistic clip in, snappy game motion out\n\
   physics-check  report balance/ballistic/momentum errors (no output)\n\
+  physics-frame  single-frame balance snapshot as JSON (3D overlay)\n\
   physics-fix    fix ballistic + momentum errors via root curves\n\
   autopose       predict a full pose from a few effector joints\n\
   clip-info      validate a clip and print its inventory\n\
@@ -39,6 +41,11 @@ stylize flags:\n\
   --angle-threshold <rad> (default 0.15)  --min-spacing <n> (default 4)\n\
   --hold <n> (default 2)  --anticipation <0..1> (default 0.25)\n\
   --anticipation-frames <n> (default 3)  --overshoot <0..2> (default 0.6)\n\
+  --keys-out <keys> (per-bone key frames sidecar for thinned import)\n\
+\n\
+physics-frame flags:\n\
+  --input <clip> --frame <n> --root <bone> --feet <a,b,...>\n\
+  (contact/foot/balance margins as physics-check; prints overlay JSON)\n\
 \n\
 physics-check flags:\n\
   --input <clip> --root <bone> --feet <a,b,...>\n\
@@ -50,10 +57,12 @@ physics-check flags:\n\
 physics-fix flags: physics-check flags plus:\n\
   --output <clip>  --blend-frames <n> (default 2)\n\
   --smooth-sigma <frames> (default 1)  --smooth-pad <n> (default 2)\n\
-  --no-ballistic  --no-momentum\n\
+  --no-ballistic  --no-momentum  --no-balance\n\
+  --max-lean-deg <deg> (default 8, total lean cap per frame)\n\
 \n\
 autopose flags:\n\
   --model <weights> --effectors <effectors> --output <clip>\n\
+  [--limits <limits>] (report joint-limit violations, exit 0)\n\
 \n\
 clip-info flags:\n\
   --input <clip> [--emit-skeleton <skeleton>]\n\
@@ -93,7 +102,16 @@ impl Cmd {
 fn is_bool_flag(key: &str) -> bool {
     matches!(
         key,
-        "pin" | "no-pin" | "no-ballistic" | "no-momentum" | "time" | "help" | "h" | "version" | "v"
+        "pin"
+            | "no-pin"
+            | "no-ballistic"
+            | "no-momentum"
+            | "no-balance"
+            | "time"
+            | "help"
+            | "h"
+            | "version"
+            | "v"
     )
 }
 
@@ -317,6 +335,12 @@ fn cmd_stylize(cmd: &Cmd) -> Result<String, (i32, String)> {
     let (out, report) = motion_core::stylize::stylize(&clip, &params).map_err(|e| (3, e))?;
     let text = emit_clip(&out).map_err(|e| (3, e))?;
     write_file(&output, &text)?;
+    if let Some(keys_path) = cmd.get("keys-out") {
+        write_file(
+            keys_path,
+            &motion_core::stylize::emit_keys(&clip.skeleton, &report),
+        )?;
+    }
 
     let mut r = String::new();
     r.push_str("=== motionforge stylize ===\n");
@@ -362,6 +386,8 @@ fn physics_params(cmd: &Cmd, for_fix: bool) -> Result<PhysicsParams, (i32, Strin
         smooth_pad: parse_usize(cmd, "smooth-pad", 2)?,
         fix_ballistic: for_fix && !cmd.flag("no-ballistic"),
         fix_momentum: for_fix && !cmd.flag("no-momentum"),
+        fix_balance: for_fix && !cmd.flag("no-balance"),
+        max_lean_deg: parse_f64(cmd, "max-lean-deg", 8.0)?,
     })
 }
 
@@ -411,6 +437,20 @@ fn physics_report_text(title: &str, report: &motion_core::physics::PhysicsReport
     r
 }
 
+fn cmd_physics_frame(cmd: &Cmd) -> Result<String, (i32, String)> {
+    let input_text = read_file(cmd.required("input")?)?;
+    let clip = parse_clip(&input_text).map_err(|e| (2, format!("input: {}", e)))?;
+    let frame = parse_usize(cmd, "frame", usize::MAX)?;
+    if frame == usize::MAX && cmd.get("frame").is_none() {
+        return Err((1, "missing required --frame".to_string()));
+    }
+    let mut params = physics_params(cmd, false)?;
+    params.fix_ballistic = false;
+    params.fix_momentum = false;
+    let snap = motion_core::physics::frame_physics(&clip, &params, frame).map_err(|e| (3, e))?;
+    motion_core::physics::emit_frame_physics(&snap).map_err(|e| (3, e))
+}
+
 fn cmd_physics_check(cmd: &Cmd) -> Result<String, (i32, String)> {
     let input_text = read_file(cmd.required("input")?)?;
     let clip = parse_clip(&input_text).map_err(|e| (2, format!("input: {}", e)))?;
@@ -431,8 +471,13 @@ fn cmd_physics_fix(cmd: &Cmd) -> Result<String, (i32, String)> {
     write_file(&output, &text)?;
     let mut r = physics_report_text("physics-fix", &report);
     r.push_str(&format!(
-        "fixed: {} ballistic phases, {} momentum frames\n",
-        report.fixed_ballistic, report.fixed_momentum_frames
+        "fixed: {} ballistic phases, {} momentum frames, {} balance frames \
+         (worst {:+.4} -> {:+.4} m)\n",
+        report.fixed_ballistic,
+        report.fixed_momentum_frames,
+        report.fixed_balance_frames,
+        report.balance_worst_before_m,
+        report.balance_worst_after_m
     ));
     r.push_str(&format!("output: {}\n", output));
     Ok(r)
@@ -467,6 +512,31 @@ fn cmd_autopose(cmd: &Cmd) -> Result<String, (i32, String)> {
         input.effectors.len(),
         weights.n_bones()
     ));
+    if let Some(path) = cmd.get("limits") {
+        let lim_text = read_file(path)?;
+        let limits = parse_limits(&lim_text).map_err(|e| (2, format!("limits: {}", e)))?;
+        let bones: Vec<String> = input
+            .skeleton
+            .bones
+            .iter()
+            .map(|b| b.name.clone())
+            .collect();
+        let rep = check_limits(&limits, &bones, &[quats.clone()]).map_err(|e| (3, e))?;
+        r.push_str(&format!(
+            "limits: {} violations, {} unmatched\n",
+            rep.violations.len(),
+            rep.unmatched.len()
+        ));
+        for v in &rep.violations {
+            r.push_str(&format!(
+                "  frame {} {}: {:.2} deg > {:.2} deg\n",
+                v.frame, v.bone, v.angle_deg, v.max_deg
+            ));
+        }
+        if !rep.unmatched.is_empty() {
+            r.push_str(&format!("  unmatched: {}\n", rep.unmatched.join(", ")));
+        }
+    }
     r.push_str(&format!("output: {}\n", output));
     Ok(r)
 }
@@ -517,6 +587,7 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "retarget" => cmd_retarget(&args),
             "stylize" => cmd_stylize(&args),
             "physics-check" => cmd_physics_check(&args),
+            "physics-frame" => cmd_physics_frame(&args),
             "physics-fix" => cmd_physics_fix(&args),
             "autopose" => cmd_autopose(&args),
             "clip-info" => cmd_clip_info(&args),

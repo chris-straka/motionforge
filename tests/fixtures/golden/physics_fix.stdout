@@ -4,5 +4,5 @@ balance: 0 violations, mean excursion -0.2038 m
 ballistic: 1 phases
   frames 2..9: residual 0.0000 m
 momentum: max accel 141.31 m/s2 (3 flags [3, 5, 7]), max turn 180.0 deg (1 flags [5])
-fixed: 1 ballistic phases, 7 momentum frames
+fixed: 1 ballistic phases, 7 momentum frames, 0 balance frames (worst -0.2038 -> -0.2038 m)
 output: <OUT>

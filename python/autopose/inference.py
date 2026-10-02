@@ -76,15 +76,18 @@ def quat_angle(a, b):
     return 2.0 * math.acos(min(1.0, d))
 
 
-def evaluate(weights_doc, skeleton, frames, effector_sets, foot_names=()):
+def evaluate(weights_doc, skeleton, frames, effector_sets, foot_names=(), limits=None):
     """Held-out style metrics over sampled effector sets.
 
     frames: list of poses (dataset format); effector_sets: list of id
     lists (one per frame, reused cyclically). Returns dict with
     mean/max joint position error (m), mean angular error (rad), foot
-    penetration count, and per-bone max angle (rad) for limit review.
+    penetration count, per-bone max angle (rad) for limit review, and
+    (when limits is given) limit_violations [(frame, bone, angle_deg,
+    max_deg)] plus limits_unmatched [sorted bone names].
     """
     from .dataset import build_input, fk
+    from .limits import frame_violations, unmatched_bones
 
     if skeleton.names != weights_doc["bones"]:
         raise ValueError("weights bones do not match the skeleton")
@@ -96,6 +99,7 @@ def evaluate(weights_doc, skeleton, frames, effector_sets, foot_names=()):
     ang_errs = []
     penetrations = 0
     bone_max_angle = [0.0] * len(skeleton.names)
+    violations = []
     for fi, poses in enumerate(frames):
         heads = fk(skeleton, poses)
         x = build_input(skeleton, heads, effector_sets[fi % len(effector_sets)])
@@ -107,6 +111,9 @@ def evaluate(weights_doc, skeleton, frames, effector_sets, foot_names=()):
             ang = quat_angle(q, want)
             ang_errs.append(ang)
             bone_max_angle[i] = max(bone_max_angle[i], ang)
+        if limits is not None:
+            for bone, ang_deg, max_deg in frame_violations(pred, skeleton.names, limits):
+                violations.append((fi, bone, ang_deg, max_deg))
         for f in feet:
             if pred_heads[f][2] < ground - 1e-9:
                 penetrations += 1
@@ -117,4 +124,6 @@ def evaluate(weights_doc, skeleton, frames, effector_sets, foot_names=()):
         "mean_angle_rad": sum(ang_errs) / len(ang_errs),
         "foot_penetrations": penetrations,
         "bone_max_angle_rad": dict(zip(skeleton.names, bone_max_angle)),
+        "limit_violations": violations,
+        "limits_unmatched": unmatched_bones(skeleton.names, limits) if limits is not None else [],
     }

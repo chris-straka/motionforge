@@ -6,6 +6,7 @@
 pub mod autopose;
 pub mod clip;
 pub mod json;
+pub mod limits;
 pub mod math;
 pub mod physics;
 pub mod retarget;

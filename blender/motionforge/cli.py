@@ -69,10 +69,12 @@ def build_retarget_args(source, target, bonemap, output, yaw="auto", pin=True):
     return args
 
 
-def build_stylize_args(input_path, output, params):
+def build_stylize_args(input_path, output, params, keys_out=None):
     """params: dict with the StylizeParams keys (chain_factors a list of
-    (substr, factor) tuples)."""
+    (substr, factor) tuples). keys_out requests the keys sidecar file."""
     args = ["stylize", "--input", input_path, "--output", output]
+    if keys_out is not None:
+        args += ["--keys-out", keys_out]
     for key in (
         "exaggeration",
         "angle_threshold",
@@ -88,10 +90,15 @@ def build_stylize_args(input_path, output, params):
     return args
 
 
-def build_physics_args(command, input_path, output, params):
-    """command: 'physics-check' or 'physics-fix'. params: dict with the
-    PhysicsParams keys (feet a list of names)."""
+def build_physics_args(command, input_path, output, params, frame=None):
+    """command: 'physics-check', 'physics-fix', or 'physics-frame'.
+    params: dict with the PhysicsParams keys (feet a list of names).
+    physics-frame needs the clip frame index."""
     args = [command, "--input", input_path]
+    if command == "physics-frame":
+        if frame is None:
+            raise ValueError("physics-frame needs a frame index")
+        args += ["--frame", repr(frame)]
     if output is not None:
         args += ["--output", output]
     args += ["--root", params["root"], "--feet", ",".join(params["feet"])]

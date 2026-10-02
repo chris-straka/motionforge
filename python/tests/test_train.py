@@ -78,6 +78,26 @@ class TestDryRun(unittest.TestCase):
                          "--feet", "Nope")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("unknown foot bone", proc.stdout)
+
+    def test_limits_loads_on_dry_run(self):
+        proc = self._run("--manifest", self._manifest(), "--out-dir",
+                         os.path.join(self.tmp.name, "out"), "--dry-run",
+                         "--feet", "LeftFoot,RightFoot",
+                         "--limits", os.path.join(FIX, "limits_hero.json"))
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("limits:", proc.stdout)
+        self.assertIn("hll_hero", proc.stdout)
+
+    def test_bad_limits_errors_cleanly(self):
+        bad = os.path.join(self.tmp.name, "bad.json")
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write('{"format": "motionforge-limits", "version": 1, '
+                    '"bones": {"A": {"max_angle_deg": 999}}}')
+        proc = self._run("--manifest", self._manifest(), "--out-dir",
+                         os.path.join(self.tmp.name, "out"), "--dry-run",
+                         "--limits", bad)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("bad --limits file", proc.stdout)
         self.assertNotIn("Traceback", proc.stdout)
 
 

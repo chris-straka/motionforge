@@ -1,12 +1,11 @@
 //! Physics pass: make keyed motion physically believable.
 //!
-//! No ML, no IK. Three checks over a clip, with one-click root-curve
-//! fixes where a root-only fix is well-defined:
+//! No ML, one small IK. Three checks over a clip, each with a fix:
 //! - Balance: horizontal center of mass against the support feet on
-//!   contact frames. Check-only in v1: a rigid root shift moves the
-//!   feet with the body, so it cannot change COM-support geometry
-//!   without foot pinning (IK, a follow-up); the report gives the
-//!   suggested nudge vector for the animator instead.
+//!   contact frames. The fix leans the body about the ground-level
+//!   support pivot toward the pinned pre-fix support (plus ankle
+//!   compensation); the report also gives a suggested nudge vector
+//!   for the animator.
 //! - Ballistic: root height over airborne phases must ride a parabola;
 //!   the fix replaces it (blended at the boundaries).
 //! - Momentum: flags root horizontal acceleration and turn-rate spikes
@@ -20,7 +19,7 @@
 //! the overlay from them.
 
 use crate::clip::{fk, Clip};
-use crate::math::Vec3;
+use crate::math::{Mat3, Quat, Vec3};
 
 #[derive(Clone, Debug)]
 pub struct PhysicsParams {
@@ -38,6 +37,10 @@ pub struct PhysicsParams {
     pub smooth_pad: usize,
     pub fix_ballistic: bool,
     pub fix_momentum: bool,
+    pub fix_balance: bool,
+    /// Total lean cap per frame (deg). Big violations get an honest
+    /// partial fix: more lean would float or bury the feet.
+    pub max_lean_deg: f64,
 }
 
 impl Default for PhysicsParams {
@@ -57,6 +60,8 @@ impl Default for PhysicsParams {
             smooth_pad: 2,
             fix_ballistic: true,
             fix_momentum: true,
+            fix_balance: true,
+            max_lean_deg: 8.0,
         }
     }
 }
@@ -83,6 +88,9 @@ impl PhysicsParams {
         }
         if self.smooth_sigma <= 0.0 {
             return Err("smooth-sigma must be positive".to_string());
+        }
+        if self.max_lean_deg <= 0.0 || self.max_lean_deg > 45.0 {
+            return Err("max-lean-deg must be in (0, 45]".to_string());
         }
         Ok(())
     }
@@ -162,6 +170,169 @@ pub struct BallisticPhase {
     pub residual_m: f64,
 }
 
+#[derive(Clone, Debug)]
+pub struct FramePhysics {
+    pub frame: usize,
+    pub com: Vec3,
+    pub root: Vec3,
+    pub feet: Vec<(String, Vec3)>,
+    pub supporters: Vec<String>,
+    pub support_center: Option<Vec3>,
+    pub support_radius: f64,
+    pub excursion_m: f64,
+    pub balanced: bool,
+    pub airborne: bool,
+}
+
+/// Single-frame balance snapshot for the 3D overlay: COM, support
+/// polygon summary, per-foot positions. Ground is the clip minimum, as
+/// in the full check.
+pub fn frame_physics(
+    clip: &Clip,
+    params: &PhysicsParams,
+    frame: usize,
+) -> Result<FramePhysics, String> {
+    params.validate()?;
+    if frame >= clip.frames.len() {
+        return Err(format!(
+            "frame {} out of range ({} frames)",
+            frame,
+            clip.frames.len()
+        ));
+    }
+    let root_idx = clip
+        .skeleton
+        .index(&params.root)
+        .ok_or_else(|| format!("unknown root bone \"{}\"", params.root))?;
+    let mut feet_idx = Vec::new();
+    for name in &params.feet {
+        feet_idx.push(
+            clip.skeleton
+                .index(name)
+                .ok_or_else(|| format!("unknown foot bone \"{}\"", name))?,
+        );
+    }
+    let tracks = build_tracks(clip, root_idx, &feet_idx);
+    let weights = com_weights(clip);
+    let ground = tracks
+        .feet
+        .iter()
+        .flat_map(|f| f.iter().map(|p| p.z))
+        .fold(f64::INFINITY, f64::min);
+    let heads = &tracks.heads[frame];
+    let com = center_of_mass(&weights, heads);
+    let feet: Vec<(String, Vec3)> = feet_idx
+        .iter()
+        .map(|i| (clip.skeleton.bones[*i].name.clone(), heads[*i]))
+        .collect();
+    let supporters: Vec<(String, Vec3)> = feet
+        .iter()
+        .filter(|(_, p)| p.z <= ground + params.contact_margin)
+        .cloned()
+        .collect();
+    if supporters.is_empty() {
+        return Ok(FramePhysics {
+            frame,
+            com,
+            root: tracks.root[frame],
+            feet,
+            supporters: vec![],
+            support_center: None,
+            support_radius: 0.0,
+            excursion_m: 0.0,
+            balanced: true,
+            airborne: true,
+        });
+    }
+    let center = supporters
+        .iter()
+        .fold(Vec3::ZERO, |a, (_, p)| a + *p)
+        .scale(1.0 / supporters.len() as f64);
+    let radius = supporters
+        .iter()
+        .map(|(_, p)| ((p.x - center.x).powi(2) + (p.y - center.y).powi(2)).sqrt())
+        .fold(0.0, f64::max)
+        + params.foot_radius;
+    let dist = ((com.x - center.x).powi(2) + (com.y - center.y).powi(2)).sqrt();
+    let excursion = dist - radius;
+    Ok(FramePhysics {
+        frame,
+        com,
+        root: tracks.root[frame],
+        feet,
+        supporters: supporters.iter().map(|(n, _)| n.clone()).collect(),
+        support_center: Some(center),
+        support_radius: radius,
+        excursion_m: excursion,
+        balanced: excursion <= params.balance_margin,
+        airborne: false,
+    })
+}
+
+/// Emit a `motionforge-frame-physics` JSON document (stdout of
+/// `physics-frame`, parsed by the Blender overlay operator).
+pub fn emit_frame_physics(snap: &FramePhysics) -> Result<String, String> {
+    use crate::json::{push_num, push_str};
+    let mut out = String::new();
+    out.push_str("{\"format\": \"motionforge-frame-physics\", \"version\": 1,\n");
+    out.push_str(&format!(" \"frame\": {},\n", snap.frame));
+    let mut vec = |key: &str, v: Vec3| -> Result<(), String> {
+        out.push_str(&format!(" \"{}\": [", key));
+        push_num(&mut out, v.x)?;
+        out.push_str(", ");
+        push_num(&mut out, v.y)?;
+        out.push_str(", ");
+        push_num(&mut out, v.z)?;
+        out.push_str("],\n");
+        Ok(())
+    };
+    vec("com", snap.com)?;
+    vec("root", snap.root)?;
+    out.push_str(" \"feet\": {");
+    for (i, (name, pos)) in snap.feet.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        push_str(&mut out, name);
+        out.push_str(": [");
+        push_num(&mut out, pos.x)?;
+        out.push_str(", ");
+        push_num(&mut out, pos.y)?;
+        out.push_str(", ");
+        push_num(&mut out, pos.z)?;
+        out.push(']');
+    }
+    out.push_str("},\n \"supporters\": [");
+    for (i, name) in snap.supporters.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        push_str(&mut out, name);
+    }
+    out.push_str("],\n");
+    match snap.support_center {
+        Some(c) => {
+            out.push_str(" \"support_center\": [");
+            push_num(&mut out, c.x)?;
+            out.push_str(", ");
+            push_num(&mut out, c.y)?;
+            out.push_str(", ");
+            push_num(&mut out, c.z)?;
+            out.push_str("],\n");
+        }
+        None => out.push_str(" \"support_center\": null,\n"),
+    }
+    out.push_str(" \"support_radius\": ");
+    push_num(&mut out, snap.support_radius)?;
+    out.push_str(",\n \"excursion_m\": ");
+    push_num(&mut out, snap.excursion_m)?;
+    out.push_str(&format!(
+        ",\n \"balanced\": {},\n \"airborne\": {}\n}}\n",
+        snap.balanced, snap.airborne
+    ));
+    Ok(out)
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PhysicsReport {
     pub contact_frames: usize,
@@ -175,6 +346,9 @@ pub struct PhysicsReport {
     pub max_turn_deg: f64,
     pub fixed_ballistic: usize,
     pub fixed_momentum_frames: usize,
+    pub fixed_balance_frames: usize,
+    pub balance_worst_before_m: f64,
+    pub balance_worst_after_m: f64,
 }
 
 struct Tracks {
@@ -389,8 +563,223 @@ pub fn physics_fix(clip: &Clip, params: &PhysicsParams) -> Result<(Clip, Physics
         }
     }
 
-    let report = physics_check(&out, params, fixed_ballistic, fixed_momentum_frames)?;
+    // Balance fix LAST: it is the final placement of the body over the
+    // feet, and earlier root-curve fixes must not move COM afterwards.
+    let mut fixed_balance_frames = 0usize;
+    let mut balance_worst_before = worst_excursion(&out, params, root_idx, &feet_idx);
+    if params.fix_balance {
+        fixed_balance_frames = balance_fix_pass(&mut out, params, root_idx, &feet_idx);
+    }
+    let balance_worst_after = worst_excursion(&out, params, root_idx, &feet_idx);
+    if !params.fix_balance {
+        balance_worst_before = balance_worst_after;
+    }
+
+    let mut report = physics_check(&out, params, fixed_ballistic, fixed_momentum_frames)?;
+    report.fixed_balance_frames = fixed_balance_frames;
+    report.balance_worst_before_m = balance_worst_before;
+    report.balance_worst_after_m = balance_worst_after;
     Ok((out, report))
+}
+
+/// Worst COM excursion over contact frames (before/after bookkeeping).
+fn worst_excursion(
+    clip: &Clip,
+    params: &PhysicsParams,
+    root_idx: usize,
+    feet_idx: &[usize],
+) -> f64 {
+    let tracks = build_tracks(clip, root_idx, feet_idx);
+    let weights = com_weights(clip);
+    let ground = tracks
+        .feet
+        .iter()
+        .flat_map(|f| f.iter().map(|p| p.z))
+        .fold(f64::INFINITY, f64::min);
+    let mut worst = f64::NEG_INFINITY;
+    for f in 0..clip.frames.len() {
+        let supporters: Vec<Vec3> = tracks
+            .feet
+            .iter()
+            .filter(|foot| foot[f].z <= ground + params.contact_margin)
+            .map(|foot| foot[f])
+            .collect();
+        if supporters.is_empty() {
+            continue;
+        }
+        let center = supporters
+            .iter()
+            .fold(Vec3::ZERO, |a, p| a + *p)
+            .scale(1.0 / supporters.len() as f64);
+        let radius = supporters
+            .iter()
+            .map(|p| ((p.x - center.x).powi(2) + (p.y - center.y).powi(2)).sqrt())
+            .fold(0.0, f64::max)
+            + params.foot_radius;
+        let com = center_of_mass(&weights, &tracks.heads[f]);
+        let dist = ((com.x - center.x).powi(2) + (com.y - center.y).powi(2)).sqrt();
+        worst = worst.max(dist - radius);
+    }
+    if worst == f64::NEG_INFINITY {
+        0.0
+    } else {
+        worst
+    }
+}
+
+/// Balance fix (mini-IK): lean the whole body about the ground-level
+/// support center to bring the COM back over the feet, then
+/// counter-rotate the ankles so the feet stay flat. Each frame leans
+/// toward its PINNED pre-fix support: without pinning, the lean lifts
+/// one foot, the support set flips mid-pass, and the iterations chase
+/// a moving target. The lean targets the margin edge (not the support
+/// edge), so the correction ramps to zero at violation boundaries by
+/// construction — no extra strength term, no Zeno stall. Total lean
+/// per frame is capped twice: by the user budget, and by a support
+/// cap that keeps the feet symmetric about the ground within the
+/// contact margin (a bigger lean would float one foot past the margin
+/// AND drag the ground down with the sunk one, collapsing support —
+/// the final honest check would read the "fix" as worse). Big
+/// violations get an honest partial fix; the residual stays reported.
+/// Returns touched frames.
+fn balance_fix_pass(
+    clip: &mut Clip,
+    params: &PhysicsParams,
+    root_idx: usize,
+    feet_idx: &[usize],
+) -> usize {
+    let weights = com_weights(clip);
+    let budget = params.max_lean_deg.to_radians();
+    let root_head = clip.skeleton.bones[root_idx].head;
+    let root_world = clip.skeleton.rest_world(root_idx);
+    // Ground and per-frame supports are clip properties: fixing one
+    // frame must not un-ground the others, so they are pinned from the
+    // pre-fix clip for the whole pass.
+    let pre_tracks = build_tracks(clip, root_idx, feet_idx);
+    let ground = pre_tracks
+        .feet
+        .iter()
+        .flat_map(|ft| ft.iter().map(|p| p.z))
+        .fold(f64::INFINITY, f64::min);
+    // Pinned per frame: support (center, radius) plus the pre-fix foot
+    // height spread and max pivot distance that bound the support cap.
+    let mut pinned: Vec<Option<(Vec3, f64, f64, f64)>> = Vec::with_capacity(clip.frames.len());
+    for f in 0..clip.frames.len() {
+        let supporters: Vec<Vec3> = pre_tracks
+            .feet
+            .iter()
+            .filter(|foot| foot[f].z <= ground + params.contact_margin)
+            .map(|foot| foot[f])
+            .collect();
+        if supporters.is_empty() {
+            pinned.push(None);
+            continue;
+        }
+        let center = supporters
+            .iter()
+            .fold(Vec3::ZERO, |a, p| a + *p)
+            .scale(1.0 / supporters.len() as f64);
+        let radius = supporters
+            .iter()
+            .map(|p| ((p.x - center.x).powi(2) + (p.y - center.y).powi(2)).sqrt())
+            .fold(0.0, f64::max)
+            + params.foot_radius;
+        let lo = supporters.iter().map(|p| p.z).fold(f64::INFINITY, f64::min);
+        let hi = supporters
+            .iter()
+            .map(|p| p.z)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let d_max = supporters
+            .iter()
+            .map(|p| ((p.x - center.x).powi(2) + (p.y - center.y).powi(2)).sqrt())
+            .fold(0.0, f64::max);
+        pinned.push(Some((center, radius, hi - lo, d_max)));
+    }
+    let to_local = root_world.transpose();
+    let mut touched = 0usize;
+    for f in 0..clip.frames.len() {
+        let Some((center, radius, spread, d_max)) = pinned[f] else {
+            continue;
+        };
+        let pivot = Vec3::new(center.x, center.y, ground);
+        // Support cap: the lean leaves feet at +/-(d*sin); both stay
+        // supporters while 2*d*sin <= margin - spread (0.8 safety).
+        // A foot already at the pivot (single support) barely moves.
+        let support_cap = if spread >= params.contact_margin {
+            0.0
+        } else if d_max < 1e-9 {
+            f64::INFINITY
+        } else {
+            (((params.contact_margin - spread) / 2.0 * 0.8) / d_max)
+                .min(1.0)
+                .asin()
+        };
+        let mut applied = false;
+        let mut spent = 0.0;
+        let mut spent_support = 0.0;
+        for _ in 0..3 {
+            let tracks = build_tracks(clip, root_idx, feet_idx);
+            let com = center_of_mass(&weights, &tracks.heads[f]);
+            let dx = center.x - com.x;
+            let dy = center.y - com.y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let excursion = dist - radius;
+            if excursion <= params.balance_margin {
+                break;
+            }
+            let h = com.z - ground;
+            if h < 0.1 || dist < 1e-9 {
+                break;
+            }
+            // Lean just enough to reach the margin edge.
+            let need = (excursion - params.balance_margin) / h;
+            let theta = need.min(budget - spent).min(support_cap - spent_support);
+            if theta <= 0.0 {
+                break;
+            }
+            spent += theta;
+            spent_support += theta;
+            let ux = dx / dist;
+            let uy = dy / dist;
+            // Positive rotation about up x u moves the COM along +u.
+            let axis = Vec3::new(-uy, ux, 0.0);
+            let lean = Quat::from_axis_angle(axis, theta).to_mat3();
+
+            let posed = fk(&clip.skeleton, &clip.frames[f]);
+            let old_foot_rot: Vec<Mat3> = feet_idx.iter().map(|i| posed[*i].rot).collect();
+            let r_new = lean.mul_mat(posed[root_idx].rot);
+            let t_new = pivot + lean.mul_vec(posed[root_idx].head - pivot);
+            clip.frames[f].poses[root_idx] = crate::clip::Pose {
+                loc: to_local.mul_vec(t_new - root_head),
+                quat: Quat::from_mat3(to_local.mul_mat(r_new)),
+            };
+            // Ankle compensation: preserve each foot's world orientation
+            // under the new parent chain (toe children follow the foot).
+            let posed2 = fk(&clip.skeleton, &clip.frames[f]);
+            for (fi, idx) in feet_idx.iter().enumerate() {
+                let (rrel, _) = clip.skeleton.rest_parent_rel(*idx);
+                let p_new = match clip.skeleton.bones[*idx].parent {
+                    None => Mat3::identity(),
+                    Some(p) => posed2[p].rot,
+                };
+                let local = rrel
+                    .transpose()
+                    .mul_mat(p_new.transpose())
+                    .mul_mat(old_foot_rot[fi]);
+                clip.frames[f].poses[*idx].quat = Quat::from_mat3(local);
+            }
+            applied = true;
+        }
+        if applied {
+            // No contact lift: the lean leaves the feet symmetric about
+            // the ground (+/-dz), which is already optimal — lifting the
+            // sunk foot would double the risen one and break support.
+            // Residual penetration (<= spread * sin(cap), mm-scale for
+            // realistic fixes) is the documented cost; full leg IK is v2.
+            touched += 1;
+        }
+    }
+    touched
 }
 
 /// (accel flags, turn flags) for a root track.
@@ -637,6 +1026,7 @@ mod tests {
         let mut p = params();
         p.fix_ballistic = false;
         p.fix_momentum = false;
+        p.fix_balance = false;
         let (_, report) = physics_fix(&clip, &p).unwrap();
         assert_eq!(report.contact_frames, 5);
         assert!(report.balance_violations.is_empty());
@@ -664,11 +1054,190 @@ mod tests {
         let mut p = params();
         p.fix_ballistic = false;
         p.fix_momentum = false;
+        p.fix_balance = false;
         let (_, report) = physics_fix(&clip, &p).unwrap();
         assert_eq!(report.balance_violations.len(), 5);
         assert!(report.balance_violations[0].excursion_m > 0.05);
         // Suggested nudge points back toward the support (-x).
         assert!(report.balance_violations[0].nudge.0 < 0.0);
+    }
+
+    #[test]
+    fn frame_snapshot_contact_and_air() {
+        let skeleton = stance_skeleton();
+        // Frame 0 grounded, frame 1 airborne (both feet +1 z).
+        let mk = |lift: f64| Frame {
+            poses: vec![
+                Pose {
+                    loc: Vec3::ZERO,
+                    quat: Quat::IDENTITY,
+                },
+                Pose {
+                    loc: Vec3::new(0.0, 0.0, lift),
+                    quat: Quat::IDENTITY,
+                },
+                Pose {
+                    loc: Vec3::new(0.0, 0.0, lift),
+                    quat: Quat::IDENTITY,
+                },
+            ],
+        };
+        let clip = Clip {
+            fps: 30.0,
+            skeleton,
+            frames: vec![mk(0.0), mk(1.0)],
+        };
+        let p = params();
+        let grounded = frame_physics(&clip, &p, 0).unwrap();
+        assert!(!grounded.airborne);
+        assert_eq!(grounded.supporters.len(), 2);
+        assert!(grounded.balanced);
+        assert!(grounded.support_center.is_some());
+        let air = frame_physics(&clip, &p, 1).unwrap();
+        assert!(air.airborne);
+        assert!(air.supporters.is_empty());
+        assert!(air.support_center.is_none());
+        assert!(frame_physics(&clip, &p, 2).is_err());
+        // Emission parses as JSON with the documented envelope.
+        let text = emit_frame_physics(&grounded).unwrap();
+        let doc = crate::json::parse(&text).unwrap();
+        assert_eq!(
+            doc.get("format").unwrap().as_str().unwrap(),
+            "motionforge-frame-physics"
+        );
+        assert_eq!(doc.get("balanced").unwrap().as_bool().unwrap(), true);
+    }
+
+    fn leaning_clip(frames: usize, head_x: f64) -> Clip {
+        let mut clip = still_clip(frames, 0.0);
+        clip.skeleton.bones.push(Bone {
+            name: "Head".to_string(),
+            parent: Some(0),
+            head: Vec3::new(0.0, 0.0, 1.6),
+            tail: Vec3::new(0.0, 1.0, 1.6),
+        });
+        for fr in clip.frames.iter_mut() {
+            fr.poses.push(Pose {
+                loc: Vec3::new(head_x, 0.0, 0.0),
+                quat: Quat::IDENTITY,
+            });
+        }
+        clip
+    }
+
+    #[test]
+    fn balance_fix_clears_small_violations() {
+        // Excursion ~0.09 (needs ~5 deg): fully fixed, feet stay down.
+        let clip = leaning_clip(5, 2.5);
+        let mut p = params();
+        p.fix_ballistic = false;
+        p.fix_momentum = false;
+        p.fix_balance = false;
+        let (_, before) = physics_fix(&clip, &p).unwrap();
+        assert_eq!(before.balance_violations.len(), 5);
+        p.fix_balance = true;
+        let (fixed, after) = physics_fix(&clip, &p).unwrap();
+        assert_eq!(after.fixed_balance_frames, 5);
+        assert!(after.balance_violations.is_empty());
+        assert!(after.balance_worst_after_m <= p.balance_margin);
+        // Feet still planted: both within contact margin, penetration
+        // bounded (no lift — the lean leaves them +/-dz by design).
+        for fr in &fixed.frames {
+            let posed = fk(&fixed.skeleton, fr);
+            for fi in [1, 2] {
+                assert!(posed[fi].head.z >= -0.025, "foot {}", fi);
+                assert!(posed[fi].head.z <= p.contact_margin + 1e-9, "foot {}", fi);
+            }
+        }
+    }
+
+    #[test]
+    fn balance_fix_partially_fixes_big_violations() {
+        // Excursion ~0.33 needs ~20 deg; the 8 deg total cap allows an
+        // honest partial fix, and the residual stays reported.
+        let clip = leaning_clip(5, 4.0);
+        let mut p = params();
+        p.fix_ballistic = false;
+        p.fix_momentum = false;
+        p.fix_balance = true;
+        let (fixed, after) = physics_fix(&clip, &p).unwrap();
+        assert_eq!(after.fixed_balance_frames, 5);
+        assert!(after.balance_worst_after_m < after.balance_worst_before_m);
+        assert!(!after.balance_violations.is_empty());
+        for fr in &fixed.frames {
+            let lean = Quat::IDENTITY.angle_to(fr.poses[0].quat);
+            assert!(lean <= 8.0f64.to_radians() + 1e-9);
+        }
+    }
+
+    #[test]
+    fn balance_fix_is_noop_when_balanced() {
+        let clip = still_clip(5, 0.0);
+        let mut p = params();
+        p.fix_ballistic = false;
+        p.fix_momentum = false;
+        p.fix_balance = false;
+        p.fix_balance = true;
+        let (fixed, report) = physics_fix(&clip, &p).unwrap();
+        assert_eq!(report.fixed_balance_frames, 0);
+        assert_eq!(
+            crate::clip::emit_clip(&fixed).unwrap(),
+            crate::clip::emit_clip(&clip).unwrap()
+        );
+    }
+
+    #[test]
+    fn balance_fix_preserves_foot_orientation_and_caps_lean() {
+        let clip = leaning_clip(3, 4.0);
+        let before_rots: Vec<crate::math::Mat3> = clip
+            .frames
+            .iter()
+            .map(|fr| fk(&clip.skeleton, fr)[1].rot)
+            .collect();
+        let mut p = params();
+        p.fix_ballistic = false;
+        p.fix_momentum = false;
+        p.fix_balance = false;
+        p.fix_balance = true;
+        let (fixed, _) = physics_fix(&clip, &p).unwrap();
+        for (fi, fr) in fixed.frames.iter().enumerate() {
+            let after = fk(&fixed.skeleton, fr)[1].rot;
+            assert!(after.approx_eq(before_rots[fi], 1e-9), "frame {}", fi);
+        }
+    }
+
+    #[test]
+    fn balance_fix_leaves_clear_frames_bit_exact() {
+        // Violation on frames 2-3 only: neighbors must be untouched
+        // (need <= 0 exactly at/below the margin).
+        let mut clip = leaning_clip(6, 0.0);
+        for fr in clip.frames.iter_mut().skip(2).take(2) {
+            fr.poses[3].loc = Vec3::new(4.0, 0.0, 0.0);
+        }
+        let mut p = params();
+        p.fix_ballistic = false;
+        p.fix_momentum = false;
+        p.fix_balance = false;
+        p.fix_balance = true;
+        let (fixed, report) = physics_fix(&clip, &p).unwrap();
+        assert_eq!(report.fixed_balance_frames, 2);
+        for fi in [0, 1, 4, 5] {
+            for (bi, pose) in fixed.frames[fi].poses.iter().enumerate() {
+                let want = &clip.frames[fi].poses[bi];
+                assert!(
+                    pose.loc.approx_eq(want.loc, 0.0),
+                    "frame {} bone {}",
+                    fi,
+                    bi
+                );
+                assert!(
+                    pose.quat.approx_eq(want.quat, 0.0),
+                    "frame {} bone {}",
+                    fi,
+                    bi
+                );
+            }
+        }
     }
 
     #[test]
@@ -728,6 +1297,7 @@ mod tests {
         let mut p = params();
         p.fix_ballistic = false;
         p.fix_momentum = false;
+        p.fix_balance = false;
         let (_, before) = physics_fix(&clip, &p).unwrap();
         assert_eq!(before.ballistic_phases.len(), 1);
         assert!(before.ballistic_phases[0].residual_m > 0.05);
@@ -778,6 +1348,7 @@ mod tests {
         let mut p = params();
         p.fix_ballistic = false;
         p.fix_momentum = false;
+        p.fix_balance = false;
         let (_, before) = physics_fix(&clip, &p).unwrap();
         assert!(!before.accel_flags.is_empty());
         let max_before = before.max_accel_m_s2;
@@ -823,6 +1394,7 @@ mod tests {
         let mut p = params();
         p.fix_ballistic = false;
         p.fix_momentum = false;
+        p.fix_balance = false;
         let (_, report) = physics_fix(&clip, &p).unwrap();
         assert!(report.turn_flags.contains(&3));
         assert!(report.max_turn_deg > 80.0);

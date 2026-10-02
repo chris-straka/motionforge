@@ -130,6 +130,7 @@ fn contract_retarget() {
 fn contract_stylize() {
     let dir = workdir("stylize");
     let out = dir.join("styl.json").to_str().unwrap().to_string();
+    let keys = dir.join("keys.json").to_str().unwrap().to_string();
     check(
         "stylize",
         &[
@@ -140,8 +141,10 @@ fn contract_stylize() {
             out.clone(),
             "--chain".to_string(),
             "Arm:1.8".to_string(),
+            "--keys-out".to_string(),
+            keys.clone(),
         ],
-        &[&out],
+        &[&out, &keys],
     );
 }
 
@@ -153,6 +156,25 @@ fn contract_physics_check() {
             "physics-check".to_string(),
             "--input".to_string(),
             fixture("jump.json"),
+            "--root".to_string(),
+            "DEF-spine".to_string(),
+            "--feet".to_string(),
+            "DEF-foot.L,DEF-foot.R".to_string(),
+        ],
+        &[],
+    );
+}
+
+#[test]
+fn contract_physics_frame() {
+    check(
+        "physics_frame",
+        &[
+            "physics-frame".to_string(),
+            "--input".to_string(),
+            fixture("jump.json"),
+            "--frame".to_string(),
+            "1".to_string(),
             "--root".to_string(),
             "DEF-spine".to_string(),
             "--feet".to_string(),
@@ -195,6 +217,27 @@ fn contract_autopose() {
             fixture("autopose_weights.json"),
             "--effectors".to_string(),
             fixture("autopose_effectors.json"),
+            "--output".to_string(),
+            out.clone(),
+        ],
+        &[&out],
+    );
+}
+
+#[test]
+fn contract_autopose_limits() {
+    let dir = workdir("autopose_limits");
+    let out = dir.join("pose.json").to_str().unwrap().to_string();
+    check(
+        "autopose_limits",
+        &[
+            "autopose".to_string(),
+            "--model".to_string(),
+            fixture("autopose_weights.json"),
+            "--effectors".to_string(),
+            fixture("autopose_effectors.json"),
+            "--limits".to_string(),
+            fixture("limits_hero.json"),
             "--output".to_string(),
             out.clone(),
         ],

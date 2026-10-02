@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from autopose import dataset, inference  # noqa: E402
+from autopose import dataset, inference, limits  # noqa: E402
 
 REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 FIX = os.path.join(REPO, "tests", "fixtures")
@@ -118,6 +118,81 @@ class TestInference(unittest.TestCase):
     def test_export_validates_shapes(self):
         with self.assertRaises(ValueError):
             inference.export_weights(["A"], [([[1.0]], [0.0])])
+
+    def test_evaluate_with_limits(self):
+        skel, frames = dataset.load_clip(os.path.join(FIX, "walk_src.json"))
+        n = len(skel.names)
+        # Dead weights + an 8-degree bias quat per bone: every frame
+        # predicts exactly 8 deg on every bone, deterministically.
+        half = math.radians(4.0)
+        bias = [math.cos(half), math.sin(half), 0.0, 0.0] * n
+        layers = [
+            ([[0.0] * (5 * n) for _ in range(8)], [0.0] * 8),
+            ([[0.0] * 8 for _ in range(4 * n)], bias),
+        ]
+        weights = inference.export_weights(skel.names, layers)
+        lim = {"rig": "test", "bones": {"Hips": 10.0, "Nope": 45.0}}
+        rep = inference.evaluate(weights, skel, frames[:2], [[0]], limits=lim)
+        self.assertEqual(rep["limits_unmatched"], ["Nope"])
+        self.assertEqual(rep["limit_violations"], [])
+        lim2 = {"rig": "test", "bones": {"Hips": 5.0}}
+        rep2 = inference.evaluate(weights, skel, frames[:2], [[0]], limits=lim2)
+        self.assertEqual(len(rep2["limit_violations"]), 2)
+        fi, bone, ang, mx = rep2["limit_violations"][0]
+        self.assertEqual((fi, bone), (0, "Hips"))
+        self.assertAlmostEqual(ang, 8.0, places=9)
+        self.assertEqual(mx, 5.0)
+
+
+class TestLimits(unittest.TestCase):
+    def test_load_fixture(self):
+        lim = limits.load_limits(os.path.join(FIX, "limits_hero.json"))
+        self.assertEqual(lim["rig"], "hll_hero")
+        self.assertEqual(len(lim["bones"]), 14)
+        self.assertEqual(lim["bones"]["DEF-spine"], 45.0)
+
+    def test_load_rejects_bad_files(self):
+        import tempfile
+        bad_docs = [
+            {"format": "nope", "version": 1, "bones": {}},
+            {"format": "motionforge-limits", "version": 2, "bones": {}},
+            {"format": "motionforge-limits", "version": 1},
+            {"format": "motionforge-limits", "version": 1, "bones": []},
+            {"format": "motionforge-limits", "version": 1,
+             "bones": {"a": {"max_angle_deg": 0}}},
+            {"format": "motionforge-limits", "version": 1,
+             "bones": {"a": {"max_angle_deg": 181}}},
+        ]
+        for doc in bad_docs:
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                json.dump(doc, f)
+                path = f.name
+            try:
+                with self.assertRaises(ValueError, msg=str(doc)):
+                    limits.load_limits(path)
+            finally:
+                os.unlink(path)
+
+    def test_python_matches_rust_limit_report(self):
+        # Same golden prediction the CLI checks: both consumers must
+        # report the same 8 violations in the same bone order.
+        lim = limits.load_limits(os.path.join(FIX, "limits_hero.json"))
+        with open(os.path.join(FIX, "golden", "autopose.0.json"), encoding="utf-8") as f:
+            rust = json.load(f)
+        bones = [b["name"] for b in rust["skeleton"]["bones"]]
+        frame = rust["frames"][0]
+        pred = [tuple(frame[name]["quat"]) for name in bones]
+        got = limits.frame_violations(pred, bones, lim)
+        with open(os.path.join(FIX, "golden", "autopose_limits.stdout"),
+                  encoding="utf-8") as f:
+            lines = [ln for ln in f.read().splitlines() if ln.startswith("  frame")]
+        self.assertEqual(len(got), len(lines))
+        self.assertEqual(len(got), 8)
+        for (bone, ang, mx), line in zip(got, lines):
+            self.assertIn(bone, line)
+            self.assertIn(f"{ang:.2f}", line)
+            self.assertIn(f"{mx:.2f}", line)
+        self.assertEqual(limits.unmatched_bones(bones, lim), [])
 
 
 if __name__ == "__main__":

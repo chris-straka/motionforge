@@ -148,6 +148,7 @@ def main():
         check(hasattr(bpy.ops.motionforge, "stylize"), "stylize operator registered")
         check(hasattr(bpy.ops.motionforge, "physics_check"), "physics_check registered")
         check(hasattr(bpy.ops.motionforge, "physics_fix"), "physics_fix registered")
+        check(hasattr(bpy.ops.motionforge, "physics_overlay"), "physics_overlay registered")
         check(hasattr(bpy.ops.motionforge, "autopose"), "autopose registered")
 
         binary = cli.find_motionforge_binary("")
@@ -207,11 +208,33 @@ def main():
         check("FINISHED" in result, "stylize finishes")
         check("Swing_stylized" in bpy.data.actions, "stylized action created")
         stylized = bpy.data.actions["Swing_stylized"]
-        check(fcurve_key_count(stylized, 'pose.bones["Mid"].rotation_quaternion', 0) == 8,
-              "dense keys imported (8 frames)")
+        thin_count = fcurve_key_count(stylized, 'pose.bones["Mid"].rotation_quaternion', 0)
+        check(2 <= thin_count < 8, f"thinned keys imported ({thin_count} < 8)")
+        frames = sorted(
+            kp.co.x
+            for fc in all_fcurves(stylized)
+            if fc.data_path == 'pose.bones["Mid"].rotation_quaternion' and fc.array_index == 0
+            for kp in fc.keyframe_points
+        )
+        check(frames[0] == 1 and frames[-1] == 8, "thinned keys span endpoints")
+        check(
+            all(kp.interpolation == "LINEAR" for fc in all_fcurves(stylized)
+                for kp in fc.keyframe_points),
+            "imported keys are LINEAR",
+        )
         check("keys kept" in params.last_report, "report stored")
+        # Dense path: thin off restores every-frame keys.
+        params.stylize_thin_keys = False
+        arm.animation_data.action = bpy.data.actions["Swing"]
+        result = bpy.ops.motionforge.stylize()
+        check("FINISHED" in result, "dense stylize finishes")
+        dense = bpy.data.actions["Swing_stylized.001"]
+        check(fcurve_key_count(dense, 'pose.bones["Mid"].rotation_quaternion', 0) == 8,
+              "dense keys imported (8 frames)")
+        params.stylize_thin_keys = True
 
         # --- physics operators ------------------------------------------
+        arm.animation_data.action = bpy.data.actions["Swing_stylized"]
         params.physics_root = "Root"
         params.physics_feet = "Tip"
         result = bpy.ops.motionforge.physics_check()
@@ -221,6 +244,20 @@ def main():
         check("FINISHED" in result, "physics_fix finishes")
         # Active action at fix time is the stylized one.
         check("Swing_stylized_physics" in bpy.data.actions, "physics action created")
+        scene.frame_set(4)
+        result = bpy.ops.motionforge.physics_overlay()
+        check("FINISHED" in result, "physics_overlay finishes")
+        com_empty = scene.objects.get("MF_COM")
+        support_empty = scene.objects.get("MF_SUPPORT")
+        check(com_empty is not None and support_empty is not None, "overlay empties created")
+        check(all(math.isfinite(c) for c in com_empty.location), "COM marker placed")
+        check("excursion" in params.last_report or "airborne" in params.last_report,
+              "overlay report stored")
+        # Re-run reuses the empties (no duplicates).
+        result = bpy.ops.motionforge.physics_overlay()
+        check("FINISHED" in result, "overlay re-run finishes")
+        check(len([o for o in scene.objects if o.name.startswith("MF_")]) == 2,
+              "overlay empties reused")
 
         # --- retarget operator (procedural pair + generated map) --------
         clean_scene()

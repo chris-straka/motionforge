@@ -1,0 +1,12 @@
+=== motionforge autopose ===
+effectors: 3, bones: 14
+limits: 8 violations, 0 unmatched
+  frame 0 DEF-spine: 134.86 deg > 45.00 deg
+  frame 0 DEF-spine.001: 129.62 deg > 60.00 deg
+  frame 0 DEF-thigh.L: 153.16 deg > 120.00 deg
+  frame 0 DEF-foot.L: 148.61 deg > 70.00 deg
+  frame 0 DEF-toe.L: 153.70 deg > 80.00 deg
+  frame 0 DEF-foot.R: 160.00 deg > 70.00 deg
+  frame 0 DEF-toe.R: 108.93 deg > 80.00 deg
+  frame 0 DEF-forearm.L: 167.16 deg > 150.00 deg
+output: <OUT>

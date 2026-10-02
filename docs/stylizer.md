@@ -34,10 +34,17 @@ pin the math: 2x exaggeration doubles a 0.5 rad extreme to 1.0;
 ease-out-back midpoint hits 0.1088 on a 0.1 target (overshoot) vs
 0.0875 without; holds freeze exactly; 2-frame clips round-trip exactly.
 
+## Import: thinned (default) or dense
+
+`stylize --keys-out` writes the per-bone key frames; the importer keys
+only those frames (LINEAR interpolation, since baked samples would
+overshoot under BEZIER). Thinned keys capture the extreme poses for
+hand-tweaking; in-betweens approximate the baked easing. Unticking
+Thin Keys imports dense every-frame keys (exact). The headless test
+pins both paths.
+
 ## Limits (v1)
 
-- Sparse-key import is follow-up: the importer writes dense keys
-  (exact), and the animator thins to the reported key frames by hand.
 - The owner-preference gate ("stylized beats original on 3 test
   clips") needs the owner; defaults are starting points, not verdicts.
 

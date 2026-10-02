@@ -101,8 +101,36 @@ pub struct StylizeReport {
     pub keys_union: Vec<usize>,
     /// (bone name, key count) for bones with more than the 2 endpoints.
     pub busy_bones: Vec<(String, usize)>,
+    /// Per-bone key frames (skeleton order) for the keys sidecar.
+    pub bone_keys: Vec<Vec<usize>>,
     pub counters_added: usize,
     pub counters_skipped: usize,
+}
+
+/// Emit the `motionforge-keys` sidecar: per-bone key frames for sparse
+/// (thinned) import. Deterministic: skeleton bone order, ascending frames.
+pub fn emit_keys(skeleton: &crate::clip::Skeleton, report: &StylizeReport) -> String {
+    use crate::json::push_str;
+    let mut out = String::new();
+    out.push_str("{\"format\": \"motionforge-keys\", \"version\": 1,\n \"bones\": {\n");
+    for (bi, bone) in skeleton.bones.iter().enumerate() {
+        out.push_str("  ");
+        push_str(&mut out, &bone.name);
+        out.push_str(": [");
+        for (ki, k) in report.bone_keys[bi].iter().enumerate() {
+            if ki > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&k.to_string());
+        }
+        out.push(']');
+        if bi + 1 < skeleton.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out.push_str(" }}\n");
+    out
 }
 
 /// Ease-out cubic (snappy attack, soft arrival).
@@ -264,17 +292,18 @@ pub fn stylize(clip: &Clip, params: &StylizeParams) -> Result<(Clip, StylizeRepo
 
     let mut union = Vec::new();
     for b in 0..nb {
-        let count = (0..n).filter(|f| key_pose[b][*f].is_some()).count();
-        if count > 2 {
+        let keys: Vec<usize> = (0..n).filter(|f| key_pose[b][*f].is_some()).collect();
+        if keys.len() > 2 {
             report
                 .busy_bones
-                .push((clip.skeleton.bones[b].name.clone(), count));
+                .push((clip.skeleton.bones[b].name.clone(), keys.len()));
         }
-        for f in 0..n {
-            if key_pose[b][f].is_some() && !union.contains(&f) {
-                union.push(f);
+        for f in keys.iter() {
+            if !union.contains(f) {
+                union.push(*f);
             }
         }
+        report.bone_keys.push(keys);
     }
     union.sort();
     report.keys_union = union;
@@ -472,6 +501,19 @@ mod tests {
         p = plain();
         p.min_spacing = 0;
         assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn keys_sidecar_lists_per_bone_keys() {
+        let clip = swing_clip(&[0.0, 0.5, 0.0]);
+        let mut p = plain();
+        p.exaggeration = 2.0;
+        p.angle_threshold = 0.1;
+        let (_, report) = stylize(&clip, &p).unwrap();
+        assert_eq!(report.bone_keys, vec![vec![0, 1, 2]]);
+        let text = emit_keys(&clip.skeleton, &report);
+        assert!(text.contains("\"motionforge-keys\""), "{}", text);
+        assert!(text.contains("\"arm.L\": [0, 1, 2]"), "{}", text);
     }
 
     #[test]

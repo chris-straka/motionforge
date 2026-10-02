@@ -1,0 +1,15 @@
+{"format": "motionforge-keys", "version": 1,
+ "bones": {
+  "Hips": [0, 47],
+  "Spine": [0, 47],
+  "LeftUpLeg": [0, 9, 12, 33, 36, 47],
+  "LeftLeg": [0, 3, 44, 47],
+  "LeftFoot": [0, 38, 41, 44, 47],
+  "RightUpLeg": [0, 9, 12, 33, 36, 47],
+  "RightLeg": [0, 24, 27, 47],
+  "RightFoot": [0, 14, 17, 47],
+  "LeftArm": [0, 47],
+  "LeftForeArm": [0, 33, 36, 44, 47],
+  "RightArm": [0, 47],
+  "RightForeArm": [0, 33, 36, 44, 47]
+ }}

@@ -76,6 +76,16 @@ Only `pairs`, `root_source`, `root_target` are required. Without the
 stride pair, root translation transfers unscaled (reported). Without
 feet, foot-slide measurement is skipped (reported).
 
+## Keys (`motionforge-keys`)
+
+Per-bone key frames for thinned import (from `stylize --keys-out`).
+Indices are clip frame numbers (0-based), ascending:
+
+```json
+{"format": "motionforge-keys", "version": 1,
+ "bones": {"Hips": [0, 47], "LeftUpLeg": [0, 9, 12, 33, 36, 47]}}
+```
+
 ## Effectors (`motionforge-effectors`)
 
 AutoPose request: a skeleton plus 1-6 constrained joints in armature
@@ -86,6 +96,23 @@ space:
  "skeleton": {"bones": [...]},
  "effectors": [{"bone": "DEF-hand.L", "position": [0.5, 0.0, 1.2]}]}
 ```
+
+## Frame physics (`motionforge-frame-physics`)
+
+Single-frame balance snapshot (stdout of `physics-frame`, parsed by the
+Blender overlay operator):
+
+```json
+{"format": "motionforge-frame-physics", "version": 1, "frame": 1,
+ "com": [0, 0, 0.64], "root": [0, 0, 0.7],
+ "feet": {"DEF-foot.L": [0.09, 0, 0.08]},
+ "supporters": ["DEF-foot.L", "DEF-foot.R"],
+ "support_center": [0, 0, 0.08], "support_radius": 0.21,
+ "excursion_m": -0.2, "balanced": true, "airborne": false}
+```
+
+Airborne frames carry `"support_center": null`, empty supporters, and
+`"airborne": true`.
 
 ## Weights (`motionforge-weights`)
 

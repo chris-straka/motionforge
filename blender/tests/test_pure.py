@@ -81,6 +81,10 @@ class TestCliBuilders(unittest.TestCase):
         self.assertIn("--exaggeration", args)
         self.assertIn("arm:1.8", args)
         self.assertEqual(args[0], "stylize")
+        self.assertNotIn("--keys-out", args)
+        keyed = cli.build_stylize_args("i", "o", params, keys_out="k")
+        self.assertIn("--keys-out", keyed)
+        self.assertIn("k", keyed)
 
     def test_physics_args(self):
         params = {
@@ -92,6 +96,11 @@ class TestCliBuilders(unittest.TestCase):
         }
         check = cli.build_physics_args("physics-check", "i", None, params)
         self.assertNotIn("--output", check)
+        frame = cli.build_physics_args("physics-frame", "i", None, params, frame=3)
+        self.assertIn("--frame", frame)
+        self.assertIn("3", frame)
+        with self.assertRaises(ValueError):
+            cli.build_physics_args("physics-frame", "i", None, params)
         fix = cli.build_physics_args("physics-fix", "i", "o", params)
         self.assertIn("--no-momentum", fix)
         self.assertNotIn("--no-ballistic", fix)

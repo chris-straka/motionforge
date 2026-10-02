@@ -191,6 +191,11 @@ class MOTIONFORGE_PG_params(bpy.types.PropertyGroup):
         description="Ease-out-back strength (0 = pure ease-out)",
         default=0.6, min=0.0, max=2.0,
     )
+    stylize_thin_keys: BoolProperty(
+        name="Thin Keys",
+        description="Import sparse keys at the kept extremes (off = dense baked keys)",
+        default=True,
+    )
 
     physics_root: StringProperty(
         name="Root Bone",
@@ -368,11 +373,14 @@ class MOTIONFORGE_OT_stylize(bpy.types.Operator):
             "overshoot": params.stylize_overshoot,
         }
         exports = {"in.json": clip_io.export_action(arm, action, start, end)}
-        args = cli.build_stylize_args("{tmp}/in.json", "{tmp}/out.json", stylize_params)
+        thin = params.stylize_thin_keys
+        args = cli.build_stylize_args("{tmp}/in.json", "{tmp}/out.json", stylize_params,
+                                      keys_out="{tmp}/keys.json" if thin else None)
 
         def do_import(tmpdir, report):
+            keys = _read_json(os.path.join(tmpdir, "keys.json")) if thin else None
             clip_io.import_clip(arm, _read_json(os.path.join(tmpdir, "out.json")),
-                                f"{action.name}_stylized", start)
+                                f"{action.name}_stylized", start, keys=keys)
 
         report = _run_feature(context, exports, args, do_import)
         keys_line = next((line for line in report.splitlines() if "keys kept" in line), "")
@@ -460,6 +468,72 @@ class MOTIONFORGE_OT_physics_fix(bpy.types.Operator):
         fixed = next((line for line in report.splitlines() if line.startswith("fixed:")), "")
         self.report({"INFO"}, f"Physics fix ({fixed.strip()})")
         return {"FINISHED"}
+
+
+class MOTIONFORGE_OT_physics_overlay(bpy.types.Operator):
+    bl_idname = "motionforge.physics_overlay"
+    bl_label = "Physics Overlay"
+    bl_description = "Show COM + support markers for the current frame"
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        try:
+            return self._run(context)
+        except (clip_io.MotionforgeError, cli.CliError) as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+
+    def _run(self, context):
+        arm = _active_armature(context)
+        action = _active_action(arm)
+        scene = context.scene
+        start, end = scene.frame_start, scene.frame_end
+        current = scene.frame_current
+        if not start <= current <= end:
+            raise clip_io.MotionforgeError(
+                f"current frame {current} is outside the scene range {start}..{end}"
+            )
+        exports = {"in.json": clip_io.export_action(arm, action, start, end)}
+        args = cli.build_physics_args("physics-frame", "{tmp}/in.json", None,
+                                      _physics_params(_params(context)),
+                                      frame=current - start)
+
+        def do_import(tmpdir, report):
+            from mathutils import Vector
+
+            snap = json.loads(report)
+            if snap.get("format") != "motionforge-frame-physics":
+                raise clip_io.MotionforgeError("bad physics-frame reply")
+            to_world = arm.matrix_world
+            com_empty = self._marker(context, "MF_COM", "SPHERE")
+            com_empty.location = to_world @ Vector(snap["com"])
+            support_empty = self._marker(context, "MF_SUPPORT", "CIRCLE")
+            if snap["support_center"] is None:
+                support_empty.hide_viewport = True
+            else:
+                support_empty.hide_viewport = False
+                support_empty.location = to_world @ Vector(snap["support_center"])
+                radius = snap["support_radius"]
+                support_empty.scale = (radius, radius, radius)
+
+        report = _run_feature(context, exports, args, do_import)
+        snap = json.loads(report)
+        if snap["airborne"]:
+            self.report({"INFO"}, f"Frame {current}: airborne, no support")
+        else:
+            self.report({"INFO"},
+                        f"Frame {current}: excursion {snap['excursion_m']:+.4f} m "
+                        f"({'balanced' if snap['balanced'] else 'VIOLATION'})")
+        return {"FINISHED"}
+
+    @staticmethod
+    def _marker(context, name, display_type):
+        empty = context.scene.objects.get(name)
+        if empty is None:
+            empty = bpy.data.objects.new(name, None)
+            empty.empty_display_type = display_type
+            context.scene.collection.objects.link(empty)
+        return empty
 
 
 class MOTIONFORGE_OT_autopose(bpy.types.Operator):
@@ -552,6 +626,7 @@ class MOTIONFORGE_PT_panel(bpy.types.Panel):
         row.prop(params, "stylize_anticipation")
         row.prop(params, "stylize_anticipation_frames")
         box.prop(params, "stylize_overshoot")
+        box.prop(params, "stylize_thin_keys")
         box.operator("motionforge.stylize", icon="PLAY")
 
         box = layout.box()
@@ -571,6 +646,7 @@ class MOTIONFORGE_PT_panel(bpy.types.Panel):
         row = box.row()
         row.operator("motionforge.physics_check", icon="VIEWZOOM")
         row.operator("motionforge.physics_fix", icon="PLAY")
+        box.operator("motionforge.physics_overlay", icon="EMPTY_DATA")
 
         box = layout.box()
         box.label(text="AutoPose", icon="BONE_DATA")
@@ -593,6 +669,7 @@ _CLASSES = (
     MOTIONFORGE_OT_stylize,
     MOTIONFORGE_OT_physics_check,
     MOTIONFORGE_OT_physics_fix,
+    MOTIONFORGE_OT_physics_overlay,
     MOTIONFORGE_OT_autopose,
     MOTIONFORGE_OT_export_godot,
     MOTIONFORGE_PT_panel,

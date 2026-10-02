@@ -1,0 +1,12 @@
+{"format": "motionforge-frame-physics", "version": 1,
+ "frame": 1,
+ "com": [0, -0.006225402504472272, 0.6404293381037566],
+ "root": [0, 0, 0.7],
+ "feet": {"DEF-foot.L": [0.09, 0, 0.08000000000000002], "DEF-foot.R": [-0.09, 0, 0.08000000000000002]},
+ "supporters": ["DEF-foot.L", "DEF-foot.R"],
+ "support_center": [0, 0, 0.08000000000000002],
+ "support_radius": 0.21,
+ "excursion_m": -0.20377459749552773,
+ "balanced": true,
+ "airborne": false
+}

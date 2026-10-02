@@ -50,11 +50,14 @@ manifest sha, metrics, gate verdict).
 ## Gates (all must pass; owner loosens nothing silently)
 
 - Held-out mean joint position error under `--gate-mm` (default 50
-  mm) AND zero foot penetrations, else exit 1 (`GATE FAIL`).
-- No joint-limit violations: no rigforge limit table exists yet, so
-  the runnable checks are foot penetration + the per-bone max-angle
-  table (`evaluate()`) for owner review; a limits export from rigforge
-  is follow-up.
+  mm) AND zero foot penetrations AND zero joint-limit violations
+  (when `--limits` is given), else exit 1 (`GATE FAIL`).
+- Joint limits come from a `motionforge-limits` table (see
+  `docs/limits.md`; `tests/fixtures/limits_hero.json` is the example).
+  The format and both consumers are done; the per-preset tables are a
+  rigforge export (handoff in `docs/limits.md`). Without `--limits`,
+  the per-bone max-angle table (`evaluate()`) is still reported for
+  owner review.
 - Inference under 10 ms per pose on CPU (measured 1.7 ms whole-command
   on 14 bones, release build).
 - Owner keyframes one attack faster than without it (needs the owner).

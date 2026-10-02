@@ -73,6 +73,8 @@ def build_parser():
     parser.add_argument("--foot-weight", type=float, default=2.0)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--gate-mm", type=float, default=50.0)
+    parser.add_argument("--limits", default=None,
+                        help="motionforge-limits JSON: heldout predictions must not violate it")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-mixamo-training", action="store_true")
@@ -91,6 +93,15 @@ def main(argv):
 
     skeleton, train, heldout, msha = load_data(args.manifest)
     n = len(skeleton.names)
+    limits = None
+    if args.limits:
+        from autopose import limits as limits_mod
+        try:
+            limits = limits_mod.load_limits(args.limits)
+        except (ValueError, OSError) as exc:
+            print(f"bad --limits file: {exc}")
+            return 1
+        print(f"limits: {args.limits} ({len(limits['bones'])} bones, rig {limits['rig'] or '?'})")
     try:
         feet = [skeleton.names.index(name.strip())
                 for name in args.feet.split(",") if name.strip()]
@@ -180,13 +191,18 @@ def main(argv):
             pred_q = pred.cpu().tolist()
             true_q = [[list(q) for (_l, q) in p] for p in heldout]
             pos_errs, ang_errs, pen_count = [], [], 0
-            for p, t, true_p in zip(pred_q, true_q, heldout):
+            limit_violations = []
+            for hi, (p, t, true_p) in enumerate(zip(pred_q, true_q, heldout)):
                 ph = dataset.fk(skeleton, [(l, tuple(q)) for (l, _), q in zip(true_p, p)])
                 th = dataset.fk(skeleton, true_p)
                 for a, c in zip(ph, th):
                     pos_errs.append(math.dist(a, c))
                 for qp, qt in zip(p, t):
                     ang_errs.append(inference.quat_angle(tuple(qp), tuple(qt)))
+                if limits is not None:
+                    for bone, ang_deg, max_deg in limits_mod.frame_violations(
+                            [tuple(q) for q in p], skeleton.names, limits):
+                        limit_violations.append([hi, bone, ang_deg, max_deg])
                 for f in feet:
                     if ph[f][2] < ground - 1e-9:
                         pen_count += 1
@@ -195,11 +211,16 @@ def main(argv):
                 "max_joint_mm": 1000.0 * max(pos_errs),
                 "mean_angle_deg": sum(ang_errs) / len(ang_errs) * 180.0 / math.pi,
                 "foot_penetrations": pen_count,
+                "limit_violations": len(limit_violations),
             }
             print("heldout: mean {:.2f} mm, max {:.2f} mm, angle {:.2f} deg, "
-                  "penetrations {}".format(
+                  "penetrations {}, limit violations {}".format(
                       metrics["mean_joint_mm"], metrics["max_joint_mm"],
-                      metrics["mean_angle_deg"], pen_count))
+                      metrics["mean_angle_deg"], pen_count, len(limit_violations)))
+            for hi, bone, ang_deg, max_deg in limit_violations[:5]:
+                print(f"  heldout {hi} {bone}: {ang_deg:.2f} deg > {max_deg:.2f} deg")
+    else:
+        limit_violations = []
 
     os.makedirs(args.out_dir, exist_ok=True)
     doc = inference.export_weights(skeleton.names, model_mod.to_plain_lists(net))
@@ -208,6 +229,7 @@ def main(argv):
         metrics is not None
         and metrics["mean_joint_mm"] <= args.gate_mm
         and metrics["foot_penetrations"] == 0
+        and not limit_violations
     )
     run = {
         "manifest": os.path.abspath(args.manifest),
@@ -225,6 +247,10 @@ def main(argv):
         "metrics": metrics,
         "gate_mm": args.gate_mm,
         "gate": "PASS" if gate_pass else "FAIL",
+        "limits_file": os.path.abspath(args.limits) if args.limits else None,
+        "limits_unmatched": (
+            limits_mod.unmatched_bones(skeleton.names, limits) if limits else []
+        ),
     }
     with open(os.path.join(args.out_dir, "run.json"), "w", encoding="utf-8") as f:
         json.dump(run, f, indent=1)
