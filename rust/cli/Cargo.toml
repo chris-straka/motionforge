@@ -1,0 +1,11 @@
+[package]
+name = "motionforge"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "motionforge"
+path = "src/main.rs"
+
+[dependencies]
+motion_core = { path = "../core" }

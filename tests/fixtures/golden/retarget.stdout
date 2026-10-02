@@ -1,0 +1,16 @@
+=== motionforge retarget ===
+mapped: 12 pairs (2 skipped)
+  skip: LeftToeBase (no source bone)
+  skip: RightToeBase (no source bone)
+chain roots: DEF-spine
+stride scale: 0.7045
+yaw: flip
+foot slide before:
+  DEF-foot.L: 8 stance frames, mean 0.3963 m/s, max 0.5410 m/s (overall max 1.0102)
+  DEF-foot.R: 8 stance frames, mean 0.3963 m/s, max 0.5410 m/s (overall max 1.0102)
+foot slide after:
+  DEF-foot.L: 8 stance frames, mean 0.1380 m/s, max 0.4626 m/s (overall max 1.8009)
+  DEF-foot.R: 7 stance frames, mean 0.2088 m/s, max 0.4798 m/s (overall max 2.1599)
+pin: 4 intervals, total drift 0.1249 m
+root travel: 0.8686 m, max swing: 0.2689 rad
+output: <OUT>

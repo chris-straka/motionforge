@@ -1,0 +1,12 @@
+=== motionforge stylize ===
+frames: 48, keys kept: 14 [0, 3, 9, 12, 14, 17, 24, 27, 33, 36, 38, 41, 44, 47]
+  LeftUpLeg: 6 keys
+  LeftLeg: 4 keys
+  LeftFoot: 5 keys
+  RightUpLeg: 6 keys
+  RightLeg: 4 keys
+  RightFoot: 4 keys
+  LeftForeArm: 5 keys
+  RightForeArm: 5 keys
+anticipation: 13 added, 1 skipped (no room)
+output: <OUT>

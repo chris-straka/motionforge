@@ -1,0 +1,12 @@
+schema_version = "1.0.0"
+
+id = "motionforge"
+version = "0.1.0"
+name = "MotionForge"
+tagline = "Retarget, stylize, physics pass, and AutoPose via the motionforge CLI"
+maintainer = "Chris Straka"
+type = "add-on"
+website = "https://github.com/chris-straka/motionforge"
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["Animation"]

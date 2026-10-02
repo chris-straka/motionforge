@@ -1,0 +1,15 @@
+=== motionforge clip-info ===
+bones: 12, frames: 48, fps: 30, duration: 1.600 s
+  Hips (parent: -, len 0.1200 m)
+  Spine (parent: Hips, len 0.4000 m)
+  LeftUpLeg (parent: Hips, len 0.4600 m)
+  LeftLeg (parent: LeftUpLeg, len 0.4200 m)
+  LeftFoot (parent: LeftLeg, len 0.1789 m)
+  RightUpLeg (parent: Hips, len 0.4600 m)
+  RightLeg (parent: RightUpLeg, len 0.4200 m)
+  RightFoot (parent: RightLeg, len 0.1789 m)
+  LeftArm (parent: Spine, len 0.2800 m)
+  LeftForeArm (parent: LeftArm, len 0.2400 m)
+  RightArm (parent: Spine, len 0.2800 m)
+  RightForeArm (parent: RightArm, len 0.2400 m)
+skeleton: <OUT>

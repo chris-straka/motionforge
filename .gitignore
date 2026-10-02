@@ -1,0 +1,25 @@
+# Local-only data (never commit: mocap, clips, weights, runs)
+data/
+models/
+bench/
+*.fbx
+*.blend
+*.blend1
+*.glb
+*.ckpt
+*.safetensors
+*.onnx
+
+# Rust build output
+rust/target/
+
+# Python
+__pycache__/
+venv/
+.venv/
+*.pyc
+
+# Blender
+blender/tests/__pycache__/
+
+.DS_Store

@@ -1,0 +1,6 @@
+=== motionforge physics-check ===
+contact frames: 4, airborne: 8
+balance: 0 violations, mean excursion -0.2038 m
+ballistic: 1 phases
+  frames 2..9: residual 0.0000 m
+momentum: max accel 900.00 m/s2 (3 flags [4, 5, 6]), max turn 180.0 deg (1 flags [5])

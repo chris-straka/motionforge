@@ -1,0 +1,15 @@
+{"format": "motionforge-skeleton", "version": 1,
+ "bones": [
+  {"name": "Hips", "parent": null, "head": [0, 0, 0.98], "tail": [0, 0, 1.1]},
+  {"name": "Spine", "parent": "Hips", "head": [0, 0, 1.1], "tail": [0, 0, 1.5]},
+  {"name": "LeftUpLeg", "parent": "Hips", "head": [0.11, 0, 0.98], "tail": [0.11, 0, 0.52]},
+  {"name": "LeftLeg", "parent": "LeftUpLeg", "head": [0.11, 0, 0.52], "tail": [0.11, 0, 0.1]},
+  {"name": "LeftFoot", "parent": "LeftLeg", "head": [0.11, 0, 0.1], "tail": [0.11, 0.16, 0.02]},
+  {"name": "RightUpLeg", "parent": "Hips", "head": [-0.11, 0, 0.98], "tail": [-0.11, 0, 0.52]},
+  {"name": "RightLeg", "parent": "RightUpLeg", "head": [-0.11, 0, 0.52], "tail": [-0.11, 0, 0.1]},
+  {"name": "RightFoot", "parent": "RightLeg", "head": [-0.11, 0, 0.1], "tail": [-0.11, 0.16, 0.02]},
+  {"name": "LeftArm", "parent": "Spine", "head": [0.2, 0, 1.45], "tail": [0.48, 0, 1.45]},
+  {"name": "LeftForeArm", "parent": "LeftArm", "head": [0.48, 0, 1.45], "tail": [0.72, 0, 1.45]},
+  {"name": "RightArm", "parent": "Spine", "head": [-0.2, 0, 1.45], "tail": [-0.48, 0, 1.45]},
+  {"name": "RightForeArm", "parent": "RightArm", "head": [-0.48, 0, 1.45], "tail": [-0.72, 0, 1.45]}
+ ]}

@@ -1,0 +1,4 @@
+# Training dependency (CPU or MPS on Apple Silicon). Manifest tooling,
+# dataset loading, and evaluation are stdlib-only; only model.py and
+# train.py need torch.
+torch>=2.4

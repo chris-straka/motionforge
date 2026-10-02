@@ -1,0 +1,202 @@
+{
+ "format": "motionforge-skeleton",
+ "version": 1,
+ "bones": [
+  {
+   "name": "DEF-spine",
+   "parent": null,
+   "head": [
+    0,
+    0,
+    0.7
+   ],
+   "tail": [
+    0,
+    0,
+    0.8
+   ]
+  },
+  {
+   "name": "DEF-spine.001",
+   "parent": "DEF-spine",
+   "head": [
+    0,
+    0,
+    0.8
+   ],
+   "tail": [
+    0,
+    0,
+    1.05
+   ]
+  },
+  {
+   "name": "DEF-thigh.L",
+   "parent": "DEF-spine",
+   "head": [
+    0.09,
+    0,
+    0.7
+   ],
+   "tail": [
+    0.09,
+    0,
+    0.38
+   ]
+  },
+  {
+   "name": "DEF-shin.L",
+   "parent": "DEF-thigh.L",
+   "head": [
+    0.09,
+    0,
+    0.38
+   ],
+   "tail": [
+    0.09,
+    0,
+    0.08
+   ]
+  },
+  {
+   "name": "DEF-foot.L",
+   "parent": "DEF-shin.L",
+   "head": [
+    0.09,
+    0,
+    0.08
+   ],
+   "tail": [
+    0.09,
+    -0.12,
+    0.02
+   ]
+  },
+  {
+   "name": "DEF-toe.L",
+   "parent": "DEF-foot.L",
+   "head": [
+    0.09,
+    -0.12,
+    0.02
+   ],
+   "tail": [
+    0.09,
+    -0.2,
+    0.01
+   ]
+  },
+  {
+   "name": "DEF-thigh.R",
+   "parent": "DEF-spine",
+   "head": [
+    -0.09,
+    0,
+    0.7
+   ],
+   "tail": [
+    -0.09,
+    0,
+    0.38
+   ]
+  },
+  {
+   "name": "DEF-shin.R",
+   "parent": "DEF-thigh.R",
+   "head": [
+    -0.09,
+    0,
+    0.38
+   ],
+   "tail": [
+    -0.09,
+    0,
+    0.08
+   ]
+  },
+  {
+   "name": "DEF-foot.R",
+   "parent": "DEF-shin.R",
+   "head": [
+    -0.09,
+    0,
+    0.08
+   ],
+   "tail": [
+    -0.09,
+    -0.12,
+    0.02
+   ]
+  },
+  {
+   "name": "DEF-toe.R",
+   "parent": "DEF-foot.R",
+   "head": [
+    -0.09,
+    -0.12,
+    0.02
+   ],
+   "tail": [
+    -0.09,
+    -0.2,
+    0.01
+   ]
+  },
+  {
+   "name": "DEF-upper_arm.L",
+   "parent": "DEF-spine.001",
+   "head": [
+    0.16,
+    0,
+    1.02
+   ],
+   "tail": [
+    0.38,
+    0,
+    1.02
+   ]
+  },
+  {
+   "name": "DEF-forearm.L",
+   "parent": "DEF-upper_arm.L",
+   "head": [
+    0.38,
+    0,
+    1.02
+   ],
+   "tail": [
+    0.56,
+    0,
+    1.02
+   ]
+  },
+  {
+   "name": "DEF-upper_arm.R",
+   "parent": "DEF-spine.001",
+   "head": [
+    -0.16,
+    0,
+    1.02
+   ],
+   "tail": [
+    -0.38,
+    0,
+    1.02
+   ]
+  },
+  {
+   "name": "DEF-forearm.R",
+   "parent": "DEF-upper_arm.R",
+   "head": [
+    -0.38,
+    0,
+    1.02
+   ],
+   "tail": [
+    -0.56,
+    0,
+    1.02
+   ]
+  }
+ ]
+}

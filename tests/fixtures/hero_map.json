@@ -1,0 +1,80 @@
+{
+ "format": "motionforge-bonemap",
+ "version": 1,
+ "pairs": [
+  {
+   "source": "Hips",
+   "target": "DEF-spine"
+  },
+  {
+   "source": "Spine",
+   "target": "DEF-spine.001"
+  },
+  {
+   "source": "LeftUpLeg",
+   "target": "DEF-thigh.L"
+  },
+  {
+   "source": "LeftLeg",
+   "target": "DEF-shin.L"
+  },
+  {
+   "source": "LeftFoot",
+   "target": "DEF-foot.L"
+  },
+  {
+   "source": "RightUpLeg",
+   "target": "DEF-thigh.R"
+  },
+  {
+   "source": "RightLeg",
+   "target": "DEF-shin.R"
+  },
+  {
+   "source": "RightFoot",
+   "target": "DEF-foot.R"
+  },
+  {
+   "source": "LeftArm",
+   "target": "DEF-upper_arm.L"
+  },
+  {
+   "source": "LeftForeArm",
+   "target": "DEF-forearm.L"
+  },
+  {
+   "source": "RightArm",
+   "target": "DEF-upper_arm.R"
+  },
+  {
+   "source": "RightForeArm",
+   "target": "DEF-forearm.R"
+  },
+  {
+   "source": "LeftToeBase",
+   "target": "DEF-toe.L"
+  },
+  {
+   "source": "RightToeBase",
+   "target": "DEF-toe.R"
+  }
+ ],
+ "root_source": "Hips",
+ "root_target": "DEF-spine",
+ "stride_source": [
+  "LeftUpLeg",
+  "LeftFoot"
+ ],
+ "stride_target": [
+  "DEF-thigh.L",
+  "DEF-foot.L"
+ ],
+ "feet_source": [
+  "LeftFoot",
+  "RightFoot"
+ ],
+ "feet_target": [
+  "DEF-foot.L",
+  "DEF-foot.R"
+ ]
+}
