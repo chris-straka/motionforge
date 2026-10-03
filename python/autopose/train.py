@@ -34,6 +34,10 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 import manifest as manifest_gate  # noqa: E402
 from autopose import dataset, inference  # noqa: E402
 
+# One encoding for training inputs, held-out eval and the exported tag
+# (Rust inference reads the tag): root-relative effector positions.
+INPUT_TAG = dataset.INPUT_ROOT_RELATIVE
+
 
 def manifest_sha(path):
     h = hashlib.sha256()
@@ -164,7 +168,7 @@ def main(argv):
             for i in idx:
                 heads = [tuple(v) for v in train_heads[i].tolist()]
                 ins.append(dataset.build_input(
-                    skeleton, heads, dataset.sample_effectors(rng, n)))
+                    skeleton, heads, dataset.sample_effectors(rng, n), INPUT_TAG))
             xb = torch.tensor(ins, dtype=torch.float64, device=device)
             pred = net(xb)
             loss = model_mod.angular_loss(pred, train_quats[idx].to(device))
@@ -185,7 +189,7 @@ def main(argv):
             eval_rng = random.Random(args.seed + 999)
             sets = [dataset.sample_effectors(eval_rng, n) for _ in heldout]
             held_heads = [dataset.fk(skeleton, p) for p in heldout]
-            ins = [dataset.build_input(skeleton, h, s)
+            ins = [dataset.build_input(skeleton, h, s, INPUT_TAG)
                    for h, s in zip(held_heads, sets)]
             pred = net(torch.tensor(ins, dtype=torch.float64, device=device))
             pred_q = pred.cpu().tolist()
@@ -223,7 +227,7 @@ def main(argv):
         limit_violations = []
 
     os.makedirs(args.out_dir, exist_ok=True)
-    doc = inference.export_weights(skeleton.names, model_mod.to_plain_lists(net))
+    doc = inference.export_weights(skeleton.names, model_mod.to_plain_lists(net), INPUT_TAG)
     inference.write_weights(os.path.join(args.out_dir, "weights.json"), doc)
     gate_pass = (
         metrics is not None

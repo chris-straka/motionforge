@@ -225,6 +225,25 @@ fn contract_autopose() {
 }
 
 #[test]
+fn contract_autopose_root_relative() {
+    let dir = workdir("autopose_rootrel");
+    let out = dir.join("pose.json").to_str().unwrap().to_string();
+    check(
+        "autopose_rootrel",
+        &[
+            "autopose".to_string(),
+            "--model".to_string(),
+            fixture("autopose_weights_rootrel.json"),
+            "--effectors".to_string(),
+            fixture("autopose_effectors_rootrel.json"),
+            "--output".to_string(),
+            out.clone(),
+        ],
+        &[&out],
+    );
+}
+
+#[test]
 fn contract_autopose_limits() {
     let dir = workdir("autopose_limits");
     let out = dir.join("pose.json").to_str().unwrap().to_string();

@@ -6,8 +6,20 @@ keyframing in Blender (move joints, select them, run AutoPose).
 
 ## Model
 
-Input per bone (rig order): constrained armature-space `[x, y, z,
-mask]`, plus the `n` bone lengths (input dim 5n). Output: one quat per
+Input per bone (rig order): constrained `[x, y, z, mask]`, plus the
+`n` bone lengths (input dim 5n). Positions are **root-relative**: the
+root bone's (bone 0's) current head is subtracted, so a pose predicts
+the same wherever the character stands. The weights file records the
+encoding in `"input"`: `effector-pos-mask+lengths/root-relative`
+(written by `train.py` since 2026-10-03; inference needs the
+effectors file's `root_position`, which the Blender extension writes)
+or `effector-pos-mask+lengths` (the original armature-space encoding;
+also assumed when the tag is missing). Older weights therefore keep
+working unchanged; retrain to get the root-relative behaviour. With
+absolute inputs, training clips that travel (a walk covers 1.2 m)
+taught the model positions that mix pose with location, and a
+character posed away from the origin was off-distribution unless its
+hips were an effector. Output: one quat per
 bone (4n), normalized. MLP with ReLU hidden layers (default 256x256);
 a small transformer only if the MLP fails its gate. Training samples
 random effector subsets (uniform count 1-6, uniform set, seeded) so any

@@ -12,9 +12,17 @@ import json
 import math
 
 
-def export_weights(bones, layers):
+def export_weights(bones, layers, input_tag=None):
     """bones: [names]; layers: [(weights_rows, bias)] with plain floats.
-    Returns the weights document dict (deterministic key order)."""
+    input_tag: how the model's input was built (dataset.INPUT_*; default
+    root-relative). Returns the weights document dict (deterministic key
+    order)."""
+    from .dataset import INPUT_ROOT_RELATIVE, INPUT_TAGS
+
+    if input_tag is None:
+        input_tag = INPUT_ROOT_RELATIVE
+    if input_tag not in INPUT_TAGS:
+        raise ValueError(f"unknown input tag {input_tag!r}")
     n = len(bones)
     if not n:
         raise ValueError("no bones")
@@ -31,7 +39,7 @@ def export_weights(bones, layers):
         "format": "motionforge-weights",
         "version": 1,
         "bones": list(bones),
-        "input": "effector-pos-mask+lengths",
+        "input": input_tag,
         "layers": [
             {"weights": [list(map(float, row)) for row in w],
              "bias": [float(b) for b in bias]}
@@ -49,6 +57,17 @@ def write_weights(path, doc):
 def load_weights(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def input_tag_of(weights_doc):
+    """The weights' input encoding; documents without a tag predate the
+    tag and are absolute."""
+    from .dataset import INPUT_ABSOLUTE, INPUT_TAGS
+
+    tag = weights_doc.get("input", INPUT_ABSOLUTE)
+    if tag not in INPUT_TAGS:
+        raise ValueError(f"unknown weights input tag {tag!r}")
+    return tag
 
 
 def forward(weights_doc, x):
@@ -102,7 +121,8 @@ def evaluate(weights_doc, skeleton, frames, effector_sets, foot_names=(), limits
     violations = []
     for fi, poses in enumerate(frames):
         heads = fk(skeleton, poses)
-        x = build_input(skeleton, heads, effector_sets[fi % len(effector_sets)])
+        x = build_input(skeleton, heads, effector_sets[fi % len(effector_sets)],
+                        input_tag_of(weights_doc))
         pred = forward(weights_doc, x)
         pred_heads = fk(skeleton, [(p[0], q) for p, q in zip(poses, pred)])
         for i, (got, want) in enumerate(zip(pred_heads, heads)):
