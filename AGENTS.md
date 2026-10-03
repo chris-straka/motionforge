@@ -5,7 +5,8 @@ physics pass, and ML AutoPose. Same split as `~/SWE/retopoforge`:
 an MIT-licensed Rust core + CLI, driven as a subprocess over files by
 a GPL Blender extension. Training lives in `python/` (PyTorch, local).
 
-Scope and gates: read `PLAN.md` first. Format + feature docs live in
+Scope and gates: read `PLAN.md` first; open follow-ups are in
+`TODO.md`. Format + feature docs live in
 `docs/`. Every claim in docs carries a measured number and the command
 behind it (`docs/measurements.md`).
 
