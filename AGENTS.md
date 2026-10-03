@@ -57,6 +57,8 @@ behind it (`docs/measurements.md`).
   and review the diff before committing.
 - Blender smoke (headless, procedural armature, no rigforge needed):
   `blender --background --factory-startup --python blender/tests/test_headless.py`.
+  CI runs it (and `blender.tests.test_batch`, which takes `$BLENDER`)
+  on Linux with Blender 5.2.1.
   With rigforge + a real clip, the live checks are in
   `docs/measurements.md`.
 - Manifest gate: `python3 tools/manifest.py --check data/manifest.json`

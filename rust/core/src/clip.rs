@@ -175,6 +175,12 @@ fn check_envelope(root: &Json, want_format: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Largest accepted coordinate (m). Generous for root motion, small
+/// enough that squared distances stay finite downstream.
+const MAX_COORD: f64 = 1e6;
+/// Largest accepted frame rate.
+const MAX_FPS: f64 = 1e4;
+
 fn parse_vec3(v: &Json, ctx: &str) -> Result<Vec3, String> {
     let arr = v
         .as_arr()
@@ -187,6 +193,12 @@ fn parse_vec3(v: &Json, ctx: &str) -> Result<Vec3, String> {
         xyz[i] = item
             .as_f64()
             .ok_or_else(|| err_here(item, &format!("{} number", ctx)))?;
+        if xyz[i].abs() > MAX_COORD {
+            return Err(format!(
+                "{}: coordinate {} out of range (|x| <= {} m)",
+                ctx, xyz[i], MAX_COORD
+            ));
+        }
     }
     Ok(Vec3::new(xyz[0], xyz[1], xyz[2]))
 }
@@ -205,8 +217,13 @@ fn parse_quat(v: &Json, ctx: &str) -> Result<Quat, String> {
             .ok_or_else(|| err_here(item, &format!("{} number", ctx)))?;
     }
     let q = Quat::new(wxyz[0], wxyz[1], wxyz[2], wxyz[3]);
-    if q.length() < 1e-9 {
+    let len = q.length();
+    if len < 1e-9 {
         return Err(format!("{}: zero-length quaternion", ctx));
+    }
+    if !len.is_finite() {
+        // Would normalize to all zeros (1/inf) and slip through.
+        return Err(format!("{}: quaternion too large to normalize", ctx));
     }
     Ok(q.normalized())
 }
@@ -282,8 +299,8 @@ pub fn parse_clip(text: &str) -> Result<Clip, String> {
     let fps = fps_json
         .as_f64()
         .ok_or_else(|| err_here(fps_json, "fps number"))?;
-    if fps <= 0.0 {
-        return Err("clip: fps must be positive".to_string());
+    if fps <= 0.0 || fps > MAX_FPS {
+        return Err(format!("clip: fps must be in (0, {}]", MAX_FPS));
     }
     let skel_json = get(&root, "skeleton", "clip")?;
     let bones_json = get(skel_json, "bones", "clip skeleton")?;
@@ -521,5 +538,27 @@ mod tests {
         let bad3 = r#"{"format": "motionforge-skeleton", "version": 1,
           "bones": [{"name": "A", "parent": null, "head": [1,2,3], "tail": [1,2,3]}]}"#;
         assert!(parse_skeleton(bad3).is_err());
+    }
+
+    #[test]
+    fn parse_rejects_absurd_magnitudes() {
+        let clip = |fps: &str, loc: &str, quat: &str| {
+            format!(
+                r#"{{"format": "motionforge-clip", "version": 1, "fps": {},
+                  "skeleton": {{"bones": [
+                    {{"name": "A", "parent": null, "head": [0,0,0], "tail": [0,0,1]}}]}},
+                  "frames": [{{"A": {{"loc": {}, "quat": {}}}}}]}}"#,
+                fps, loc, quat
+            )
+        };
+        assert!(parse_clip(&clip("30", "[0,0,1e6]", "[1,0,0,0]")).is_ok());
+        assert!(parse_clip(&clip("10000", "[0,0,0]", "[2,0,0,0]")).is_ok());
+        let e = parse_clip(&clip("30", "[0,1e300,0]", "[1,0,0,0]")).unwrap_err();
+        assert!(e.contains("out of range"), "{}", e);
+        let e = parse_clip(&clip("1e300", "[0,0,0]", "[1,0,0,0]")).unwrap_err();
+        assert!(e.contains("fps"), "{}", e);
+        // |q| overflows to inf; normalizing would give all zeros.
+        let e = parse_clip(&clip("30", "[0,0,0]", "[1e300,1e300,0,0]")).unwrap_err();
+        assert!(e.contains("too large"), "{}", e);
     }
 }

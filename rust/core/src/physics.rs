@@ -75,8 +75,15 @@ impl PhysicsParams {
         if self.feet.is_empty() {
             return Err("physics needs --feet <a,b,...>".to_string());
         }
-        if self.contact_margin < 0.0 || self.foot_radius <= 0.0 || self.balance_margin < 0.0 {
-            return Err("contact/foot/balance margins must be >= 0 (foot radius > 0)".to_string());
+        let margins = [self.contact_margin, self.foot_radius, self.balance_margin];
+        if self.contact_margin < 0.0
+            || self.foot_radius <= 0.0
+            || self.balance_margin < 0.0
+            || margins.iter().any(|m| *m > 100.0)
+        {
+            return Err(
+                "contact/foot/balance margins must be in [0, 100] m (foot radius > 0)".to_string(),
+            );
         }
         if self.min_air_frames < 3 {
             return Err("min-air-frames must be >= 3".to_string());
@@ -1035,6 +1042,15 @@ mod tests {
         assert!(p.validate().is_ok());
         p.smooth_pad = 99_999_999_999;
         assert!(p.validate().unwrap_err().contains("smooth-pad"));
+    }
+
+    #[test]
+    fn margins_are_bounded() {
+        let mut p = params();
+        p.foot_radius = 100.0;
+        assert!(p.validate().is_ok());
+        p.foot_radius = 1e308;
+        assert!(p.validate().unwrap_err().contains("margins"));
     }
 
     #[test]

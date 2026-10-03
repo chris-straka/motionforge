@@ -7,7 +7,7 @@ the CLI outputs byte-for-byte.
 
 ## Rust suite
 
-- 59 unit + 9 contract tests green, zero warnings, fmt clean:
+- 61 unit + 9 contract tests green, zero warnings, fmt clean:
   `cd rust && cargo fmt --all --check && cargo test --locked --release`
   (2026-10-03, also on Linux x86_64 / glibc, rustc 1.97.0).
 - Cross-platform byte-determinism: before `detmath`, the stylize
@@ -24,7 +24,9 @@ the CLI outputs byte-for-byte.
   guard against platform libm calls in core code).
 - Offline build (zero crates): `cargo build --offline` (no network).
 - CI (`.github/workflows/ci.yml`) runs the suite above on Linux x86_64
-  and macOS arm64, plus the stdlib Python suites.
+  and macOS arm64, plus the stdlib Python suites and, on Linux with
+  Blender 5.2.1, `blender/tests/test_headless.py` and
+  `blender.tests.test_batch` (`MF_REQUIRE_BLENDER=1`: fail, not skip).
 - Robustness: a throwaway structured fuzzer (723 CLI runs over mutated
   clips/skeletons/bone maps and edge-case flags, 2026-10-03) found a
   stack-overflow abort on deeply nested JSON, a quadratic parse of
@@ -32,9 +34,11 @@ the CLI outputs byte-for-byte.
   `--smooth-sigma 1e11` / `--smooth-pad 1e11`. Now: nesting capped at
   512 (clean error), per-char UTF-8 decode (same 400k-char string in
   the unit test parses instantly), smoothing flags bounded to 1000
-  frames. Re-run: no crashes, hangs or timeouts. Remaining: absurd
-  magnitudes (1e300 positions or fps) print `inf` in text reports;
-  output files still reject non-finite numbers.
+  frames. Absurd magnitudes (1e300 positions or fps, 1e308 foot
+  radius) used to print `inf` in text reports, and a quaternion like
+  `[1e300, 1e300, 0, 0]` normalized silently to all zeros; clips now
+  bound coordinates (1e6 m), fps (1e4) and quaternion length, and
+  physics margins are bounded to 100 m. Re-run: 723 cases, 0 problems.
 
 ## Blender-exactness
 
