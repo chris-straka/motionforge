@@ -12,6 +12,7 @@
 //!   `docs/retarget.md`). The degenerate direction -Y maps via 180 deg
 //!   about +Z.
 
+use crate::detmath;
 use std::ops::{Add, Mul, Sub};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -128,7 +129,7 @@ impl Mat3 {
     }
 
     pub fn rotation_z(angle: f64) -> Mat3 {
-        let (s, c) = angle.sin_cos();
+        let (s, c) = detmath::sin_cos(angle);
         Mat3::from_rows([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
     }
 
@@ -240,7 +241,7 @@ impl Quat {
 
     pub fn from_axis_angle(axis: Vec3, angle: f64) -> Quat {
         let a = axis.normalized();
-        let (s, c) = (0.5 * angle).sin_cos();
+        let (s, c) = detmath::sin_cos(0.5 * angle);
         Quat::new(c, a.x * s, a.y * s, a.z * s)
     }
 
@@ -307,7 +308,7 @@ impl Quat {
 
     /// Angle between two orientations in radians: `2*acos(|dot|)`.
     pub fn angle_to(self, o: Quat) -> f64 {
-        2.0 * self.dot(o).abs().min(1.0).acos()
+        2.0 * detmath::acos(self.dot(o).abs().min(1.0))
     }
 
     /// Slerp that also extrapolates for `t` outside `[0, 1]` (used by the
@@ -330,10 +331,10 @@ impl Quat {
             )
             .normalized();
         }
-        let omega = d.min(1.0).acos();
-        let s = omega.sin();
-        let a = ((1.0 - t) * omega).sin() / s;
-        let c = (t * omega).sin() / s;
+        let omega = detmath::acos(d.min(1.0));
+        let s = detmath::sin(omega);
+        let a = detmath::sin((1.0 - t) * omega) / s;
+        let c = detmath::sin(t * omega) / s;
         Quat::new(
             self.w * a + b.w * c,
             self.x * a + b.x * c,
@@ -370,7 +371,7 @@ pub fn shortest_arc(from: Vec3, to: Vec3) -> Quat {
     }
     let axis = from.cross(to);
     // axis is non-degenerate here (|axis| = sin(angle) >> 0).
-    Quat::from_axis_angle(axis.normalized(), d.clamp(-1.0, 1.0).acos())
+    Quat::from_axis_angle(axis.normalized(), detmath::acos(d.clamp(-1.0, 1.0)))
 }
 
 /// Zero-roll rest basis for a bone running head->tail: the shortest-arc

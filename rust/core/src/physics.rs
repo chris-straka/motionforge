@@ -19,6 +19,7 @@
 //! the overlay from them.
 
 use crate::clip::{fk, Clip};
+use crate::detmath;
 use crate::math::{Mat3, Quat, Vec3};
 
 #[derive(Clone, Debug)]
@@ -425,7 +426,7 @@ fn gaussian_smooth(values: &[f64], sigma: f64) -> Vec<f64> {
         let mut norm = 0.0;
         for k in -radius..=radius {
             let j = (i as isize + k).clamp(0, values.len() as isize - 1) as usize;
-            let w = (-0.5 * (k as f64 / sigma).powi(2)).exp();
+            let w = detmath::exp(-0.5 * (k as f64 / sigma).powi(2));
             acc += values[j] * w;
             norm += w;
         }
@@ -710,9 +711,7 @@ fn balance_fix_pass(
         } else if d_max < 1e-9 {
             f64::INFINITY
         } else {
-            (((params.contact_margin - spread) / 2.0 * 0.8) / d_max)
-                .min(1.0)
-                .asin()
+            detmath::asin((((params.contact_margin - spread) / 2.0 * 0.8) / d_max).min(1.0))
         };
         let mut applied = false;
         let mut spent = 0.0;
@@ -809,7 +808,7 @@ fn momentum_flags(root: &[Vec3], fps: f64, params: &PhysicsParams) -> (Vec<usize
             continue;
         }
         let dot = (w[0].0 * w[1].0 + w[0].1 * w[1].1) / (s0 * s1);
-        let deg = dot.clamp(-1.0, 1.0).acos().to_degrees();
+        let deg = detmath::acos(dot.clamp(-1.0, 1.0)).to_degrees();
         if deg > params.turn_deg {
             turn_flags.push(i + 1);
         }
@@ -941,7 +940,7 @@ fn physics_check(
         let s1 = (w[1].0 * w[1].0 + w[1].1 * w[1].1).sqrt();
         if s0 >= params.min_turn_speed && s1 >= params.min_turn_speed {
             let dot = (w[0].0 * w[1].0 + w[0].1 * w[1].1) / (s0 * s1);
-            max_turn = max_turn.max(dot.clamp(-1.0, 1.0).acos().to_degrees());
+            max_turn = max_turn.max(detmath::acos(dot.clamp(-1.0, 1.0)).to_degrees());
         }
     }
     report.accel_flags = accel_flags;

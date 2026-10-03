@@ -7,8 +7,21 @@ the CLI outputs byte-for-byte.
 
 ## Rust suite
 
-- 39 unit + 7 contract tests green, zero warnings, fmt clean:
+- 56 unit + 9 contract tests green, zero warnings, fmt clean:
   `cd rust && cargo fmt --all --check && cargo test --locked --release`
+  (2026-10-03, also on Linux x86_64 / glibc, rustc 1.97.0).
+- Cross-platform byte-determinism: before `detmath`, the stylize
+  golden (generated on macOS aarch64) drifted on Linux x86_64 in 5 of
+  its lines (1-ulp `slerp` differences from the platform `acos`/`sin`).
+  `detmath` is bit-identical to rust-lang/libm 0.2.15 on 84,000,000
+  comparisons (sin, cos, sincos, asin, acos, exp over random bit
+  patterns and dense [-10,10], [-1,1], [-750,710] sweeps; throwaway
+  harness linking the libm crate source, 2026-10-03). Regenerating
+  the goldens changed 3 of 4106 numbers in `stylize.0.json`, each by
+  1 ulp; the other 14 golden files were already identical.
+  In-tree: `cargo test --locked --release -p motion_core detmath`
+  (within 2 ulp of the host libm on 80k inputs, pinned bit patterns,
+  guard against platform libm calls in core code).
 - Offline build (zero crates): `cargo build --offline` (no network).
 
 ## Blender-exactness
