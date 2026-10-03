@@ -357,6 +357,29 @@ def main():
         finally:
             os.unlink(weights_path)
 
+        # --- autopose: root-relative weights ----------------------------
+        # The exporter records the root's current head; moving the whole
+        # character moves root and effectors together.
+        eff = clip_io.export_effectors(arm, ["Tip"])
+        root_head = tuple(round(c, 6) for c in eff["root_position"])
+        check(root_head == (0.0, 0.0, 1.0), f"root_position is Root's head ({root_head})")
+        arm.pose.bones["Root"].location = (0.3, 0.0, 0.2)
+        bpy.context.view_layer.update()
+        moved = clip_io.export_effectors(arm, ["Tip"])
+        rel = [e - r for e, r in zip(eff["effectors"][0]["position"], eff["root_position"])]
+        rel_moved = [e - r for e, r in zip(moved["effectors"][0]["position"],
+                                           moved["root_position"])]
+        check(max(abs(a - b) for a, b in zip(rel, rel_moved)) < 1e-6,
+              "effector offset from root survives moving the character")
+        weights["input"] = "effector-pos-mask+lengths/root-relative"
+        with open(weights_path, "w", encoding="utf-8") as f:
+            json.dump(weights, f)
+        try:
+            result = bpy.ops.motionforge.autopose()
+            check("FINISHED" in result, "autopose finishes with root-relative weights")
+        finally:
+            os.unlink(weights_path)
+
         # --- negative paths ---------------------------------------------
         bpy.ops.object.mode_set(mode="OBJECT")
         clean_scene()

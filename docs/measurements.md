@@ -7,7 +7,7 @@ the CLI outputs byte-for-byte.
 
 ## Rust suite
 
-- 62 unit + 9 contract tests green, zero warnings, fmt clean:
+- 64 unit + 10 contract tests green, zero warnings, fmt clean:
   `cd rust && cargo fmt --all --check && cargo test --locked --release`
   (2026-10-03, also on Linux x86_64 / glibc, rustc 1.97.0).
 - Cross-platform byte-determinism: before `detmath`, the stylize
@@ -95,7 +95,13 @@ the CLI outputs byte-for-byte.
 - Inference: whole `motionforge autopose` command 1.7 ms (release,
   14 bones, `--time` on stderr) — gate is 10 ms per pose.
 - Python forward pass agrees with the Rust golden to last ULP
-  (component diffs < 1e-12; `test_python_matches_rust_golden`).
+  (component diffs < 1e-12; `test_python_matches_rust_golden`), for
+  both input encodings (`autopose.0.json` absolute,
+  `autopose_rootrel.0.json` root-relative).
+- Root-relative inputs: identical prediction with the character moved
+  7 m (`autopose::tests::root_relative_inputs_ignore_where_the_character_stands`),
+  and identical model input for a walk frame shifted by (3, -2, 0.5) m
+  to 1e-12 (`test_root_relative_input_ignores_where_the_character_stands`).
 - Training smoke (walk clip as train+heldout, MLP 64x64, 30 epochs,
   CPU, seed 1): loss 0.589 -> 0.022, heldout angle 110 -> 21 deg;
   GATE FAIL on the toy as expected; trained weights load into the CLI.
@@ -113,7 +119,7 @@ the CLI outputs byte-for-byte.
 
 ## Python suites
 
-- Manifest gate 9 tests, autopose/training-path 12 tests (torch-free;
+- Manifest gate 9 tests, autopose/training-path 20 tests (torch-free;
   `test_missing_torch_errors_cleanly` runs a real 1-epoch training
   when torch is installed).
 - Torch modules compile: `python3 -m py_compile

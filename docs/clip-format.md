@@ -92,11 +92,14 @@ Indices are clip frame numbers (0-based), ascending:
 ## Effectors (`motionforge-effectors`)
 
 AutoPose request: a skeleton plus 1-6 constrained joints in armature
-space:
+space, and the root bone's (skeleton bone 0's) current head. That
+`root_position` is required by root-relative weights and ignored by
+absolute ones (see `docs/autopose.md`):
 
 ```json
 {"format": "motionforge-effectors", "version": 1,
  "skeleton": {"bones": [...]},
+ "root_position": [0.0, 0.0, 0.98],
  "effectors": [{"bone": "DEF-hand.L", "position": [0.5, 0.0, 1.2]}]}
 ```
 
@@ -124,13 +127,17 @@ AutoPose MLP in a small custom format (CPU inference, no runtime):
 ```json
 {"format": "motionforge-weights", "version": 1,
  "bones": ["DEF-spine", "..."],
- "input": "effector-pos-mask+lengths",
+ "input": "effector-pos-mask+lengths/root-relative",
  "layers": [{"weights": [[0.01]], "bias": [0.0]}]}
 ```
 
 Input vector: per bone in `bones` order, `[px, py, pz, mask]`
-(constrained armature-space position, or zeros + mask 0), followed by
-the `n` bone lengths (tail-head distance). Output: `4n` numbers, one
+(constrained position, or zeros + mask 0), followed by the `n` bone
+lengths (tail-head distance). `"input"` names the position encoding:
+`effector-pos-mask+lengths/root-relative` (position minus the
+effectors file's `root_position`; current training output) or
+`effector-pos-mask+lengths` (armature-space; the original encoding,
+also assumed when `"input"` is absent). Any other value is an error. Output: `4n` numbers, one
 `(w, x, y, z)` quat per bone, normalized by inference. Hidden layers
 use ReLU; the last layer is linear. `layers[i].weights` is
 row-major, `rows = outputs`, `cols = inputs`.

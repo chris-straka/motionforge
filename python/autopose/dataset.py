@@ -186,13 +186,30 @@ def sample_effectors(rng, n_bones, min_k=1, max_k=6):
     return sorted(rng.sample(range(n_bones), k))
 
 
-def build_input(skeleton, heads, effector_ids):
-    """Flat model input: per bone [x, y, z, mask], then bone lengths."""
+# Weights "input" tags. ROOT_RELATIVE (the default for new training):
+# effector positions are measured from the root bone's posed head, so a
+# pose predicts the same wherever the character stands. ABSOLUTE is the
+# original v1 encoding (armature-space positions), still accepted so
+# existing weights keep working.
+INPUT_ABSOLUTE = "effector-pos-mask+lengths"
+INPUT_ROOT_RELATIVE = "effector-pos-mask+lengths/root-relative"
+INPUT_TAGS = (INPUT_ABSOLUTE, INPUT_ROOT_RELATIVE)
+
+
+def build_input(skeleton, heads, effector_ids, input_tag=INPUT_ROOT_RELATIVE):
+    """Flat model input: per bone [x, y, z, mask], then bone lengths.
+
+    Root-relative inputs subtract the root's head (bone 0: parents come
+    before children, so bone 0 is always a root)."""
+    if input_tag not in INPUT_TAGS:
+        raise ValueError(f"unknown input tag {input_tag!r}")
+    origin = heads[0] if input_tag == INPUT_ROOT_RELATIVE else (0.0, 0.0, 0.0)
     eff = set(effector_ids)
     x = []
     for i in range(len(skeleton.names)):
         if i in eff:
-            x.extend([heads[i][0], heads[i][1], heads[i][2], 1.0])
+            x.extend([heads[i][0] - origin[0], heads[i][1] - origin[1],
+                      heads[i][2] - origin[2], 1.0])
         else:
             x.extend([0.0, 0.0, 0.0, 0.0])
     x.extend(skeleton.lengths)

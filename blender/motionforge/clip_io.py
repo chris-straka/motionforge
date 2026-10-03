@@ -292,9 +292,14 @@ def export_effectors(arm_obj, bone_names):
         # matrix_world applied); effectors want armature space.
         head = pose_bone.matrix.translation
         effectors.append({"bone": name, "position": [c for c in head]})
+    skeleton = export_skeleton(arm_obj)
+    # Root-relative weights measure effectors from the root (skeleton
+    # bone 0, topological order) wherever the animator has put it.
+    root = arm_obj.pose.bones[skeleton["bones"][0]["name"]]
     return {
         "format": "motionforge-effectors",
         "version": 1,
-        "skeleton": export_skeleton(arm_obj),
+        "skeleton": skeleton,
+        "root_position": [c for c in root.matrix.translation],
         "effectors": effectors,
     }

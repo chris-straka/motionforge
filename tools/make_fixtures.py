@@ -4,6 +4,13 @@
 Writes tests/fixtures/*.json deterministically (no timestamps, fixed
 seeds). Run from the repo root: `python3 tools/make_fixtures.py`.
 
+Deterministic per platform only: the trig-built clips (walk_src.json)
+go through Python's math.sin/cos, i.e. the platform libm, and shift in
+the last bit between macOS and Linux (measured 2026-10-03: 14 numbers,
+max 1.2e-16). After regenerating, commit only the files you meant to
+change and `git checkout` any such drift; the CLI goldens are pinned
+to the committed bytes.
+
 Local-frame note: clip loc/quat channels live in each bone's
 parent-relative rest frame (Blender matrix_basis). This generator works
 in world space and converts through the zero-roll rest basis
@@ -294,18 +301,49 @@ def main():
         )
         f.write("\n")
 
+    # Same layers, root-relative input encoding (the default for new
+    # training): effector positions are measured from the root's head.
+    with open(os.path.join(OUT, "autopose_weights_rootrel.json"), "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "format": "motionforge-weights",
+                "version": 1,
+                "bones": names,
+                "input": "effector-pos-mask+lengths/root-relative",
+                "layers": layers,
+            },
+            f,
+        )
+        f.write("\n")
+
     # --- autopose effectors --------------------------------------------------
+    effectors = [
+        {"bone": "DEF-forearm.L", "position": [0.56, 0.1, 1.3]},
+        {"bone": "DEF-forearm.R", "position": [-0.56, 0.1, 1.3]},
+        {"bone": "DEF-spine.001", "position": [0.0, 0.0, 1.1]},
+    ]
     with open(os.path.join(OUT, "autopose_effectors.json"), "w", encoding="utf-8") as f:
         json.dump(
             {
                 "format": "motionforge-effectors",
                 "version": 1,
                 "skeleton": {"bones": hero.to_json()},
-                "effectors": [
-                    {"bone": "DEF-forearm.L", "position": [0.56, 0.1, 1.3]},
-                    {"bone": "DEF-forearm.R", "position": [-0.56, 0.1, 1.3]},
-                    {"bone": "DEF-spine.001", "position": [0.0, 0.0, 1.1]},
-                ],
+                "effectors": effectors,
+            },
+            f,
+            indent=1,
+        )
+        f.write("\n")
+    # With the root's current head, as the Blender exporter writes it
+    # (needed by root-relative weights; ignored by absolute ones).
+    with open(os.path.join(OUT, "autopose_effectors_rootrel.json"), "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "format": "motionforge-effectors",
+                "version": 1,
+                "skeleton": {"bones": hero.to_json()},
+                "root_position": [0.05, -0.02, 0.98],
+                "effectors": effectors,
             },
             f,
             indent=1,

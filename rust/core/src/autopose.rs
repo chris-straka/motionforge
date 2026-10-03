@@ -3,9 +3,13 @@
 //! The model is a small MLP (trained in `python/`, see `docs/autopose.md`)
 //! exported to the `motionforge-weights` format: row-major layers, ReLU
 //! hidden activations, linear output. Input per bone (weights-bone
-//! order): constrained armature-space `[x, y, z, mask]` (`mask` 1 when
-//! the animator moved that joint, else zeros), followed by the `n` bone
-//! lengths. Output: one `(w, x, y, z)` quat per bone, normalized (zero
+//! order): constrained `[x, y, z, mask]` (`mask` 1 when the animator
+//! moved that joint, else zeros), followed by the `n` bone lengths.
+//! Positions are root-relative (minus the root bone's current head,
+//! `root_position` in the effectors file) for weights tagged
+//! [`INPUT_ROOT_RELATIVE`], so a pose predicts the same wherever the
+//! character stands; untagged / [`INPUT_ABSOLUTE`] weights (the original
+//! encoding) get armature-space positions. Output: one `(w, x, y, z)` quat per bone, normalized (zero
 //! rows become identity). Inference is plain CPU matvecs — microseconds
 //! for the shipped sizes, far under the 10 ms gate.
 //!
@@ -20,6 +24,9 @@ use crate::retarget::skeleton_from_json;
 pub const WEIGHTS_FORMAT: &str = "motionforge-weights";
 pub const EFFECTORS_FORMAT: &str = "motionforge-effectors";
 pub const MAX_EFFECTORS: usize = 6;
+/// Weights `input` tags (must match `python/autopose/dataset.py`).
+pub const INPUT_ABSOLUTE: &str = "effector-pos-mask+lengths";
+pub const INPUT_ROOT_RELATIVE: &str = "effector-pos-mask+lengths/root-relative";
 
 #[derive(Clone, Debug)]
 pub struct Layer {
@@ -34,6 +41,8 @@ pub struct Layer {
 pub struct Weights {
     pub bones: Vec<String>,
     pub layers: Vec<Layer>,
+    /// Inputs are measured from the root's head (see module docs).
+    pub root_relative: bool,
 }
 
 impl Weights {
@@ -51,6 +60,14 @@ pub fn parse_weights(text: &str) -> Result<Weights, String> {
         Some(1.0) => {}
         _ => return Err("invalid motionforge-weights: unsupported version".to_string()),
     }
+    let root_relative = match root.get("input") {
+        None => false,
+        Some(v) => match v.as_str() {
+            Some(INPUT_ABSOLUTE) => false,
+            Some(INPUT_ROOT_RELATIVE) => true,
+            _ => return Err(format!("weights: unknown \"input\" encoding {:?}", v)),
+        },
+    };
     let bones_json = root
         .get("bones")
         .ok_or_else(|| "weights: missing \"bones\"".to_string())?;
@@ -170,7 +187,11 @@ pub fn parse_weights(text: &str) -> Result<Weights, String> {
             n
         ));
     }
-    Ok(Weights { bones, layers })
+    Ok(Weights {
+        bones,
+        layers,
+        root_relative,
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -178,6 +199,9 @@ pub struct EffectorInput {
     pub skeleton: Skeleton,
     /// (bone index, armature-space position).
     pub effectors: Vec<(usize, Vec3)>,
+    /// The root bone's (bone 0's) current armature-space head; required
+    /// by root-relative weights.
+    pub root_position: Option<Vec3>,
 }
 
 pub fn parse_effectors(text: &str) -> Result<EffectorInput, String> {
@@ -193,6 +217,10 @@ pub fn parse_effectors(text: &str) -> Result<EffectorInput, String> {
         .get("skeleton")
         .ok_or_else(|| "effectors: missing \"skeleton\"".to_string())?;
     let skeleton = skeleton_from_json(skel_json)?;
+    let root_position = match root.get("root_position") {
+        None => None,
+        Some(v) => Some(parse_xyz(v, "effectors: root_position")?),
+    };
     let eff_json = root
         .get("effectors")
         .ok_or_else(|| "effectors: missing \"effectors\"".to_string())?;
@@ -220,24 +248,30 @@ pub fn parse_effectors(text: &str) -> Result<EffectorInput, String> {
         let pos = item
             .get("position")
             .ok_or_else(|| format!("effectors: entry {} missing position", i))?;
-        let arr = pos
-            .as_arr()
-            .ok_or_else(|| format!("effectors: entry {} position must be [x, y, z]", i))?;
-        if arr.len() != 3 {
-            return Err(format!("effectors: entry {} position must be [x, y, z]", i));
-        }
-        let mut xyz = [0.0; 3];
-        for (k, v) in arr.iter().enumerate() {
-            xyz[k] = v
-                .as_f64()
-                .ok_or_else(|| format!("effectors: entry {} non-numeric position", i))?;
-        }
-        effectors.push((idx, Vec3::new(xyz[0], xyz[1], xyz[2])));
+        effectors.push((
+            idx,
+            parse_xyz(pos, &format!("effectors: entry {} position", i))?,
+        ));
     }
     Ok(EffectorInput {
         skeleton,
         effectors,
+        root_position,
     })
+}
+
+fn parse_xyz(v: &crate::json::Json, ctx: &str) -> Result<Vec3, String> {
+    let arr = v
+        .as_arr()
+        .filter(|a| a.len() == 3)
+        .ok_or_else(|| format!("{} must be [x, y, z]", ctx))?;
+    let mut xyz = [0.0; 3];
+    for (k, item) in arr.iter().enumerate() {
+        xyz[k] = item
+            .as_f64()
+            .ok_or_else(|| format!("{} must be numeric", ctx))?;
+    }
+    Ok(Vec3::new(xyz[0], xyz[1], xyz[2]))
 }
 
 /// Run the MLP: returns one local-delta quat per bone (weights order).
@@ -255,12 +289,22 @@ pub fn infer(weights: &Weights, input: &EffectorInput) -> Result<Vec<Quat>, Stri
             "weights bones do not match the effector skeleton (same rig, same order)".to_string(),
         );
     }
+    let origin = if weights.root_relative {
+        input.root_position.ok_or_else(|| {
+            "these weights are root-relative: the effectors file needs \"root_position\" \
+             (the root bone's current head); re-export from the Blender extension"
+                .to_string()
+        })?
+    } else {
+        Vec3::ZERO
+    };
     // Input vector: per bone [x, y, z, mask], then bone lengths.
     let mut x = vec![0.0; 5 * n];
     for (idx, pos) in &input.effectors {
-        x[4 * idx] = pos.x;
-        x[4 * idx + 1] = pos.y;
-        x[4 * idx + 2] = pos.z;
+        let p = *pos - origin;
+        x[4 * idx] = p.x;
+        x[4 * idx + 1] = p.y;
+        x[4 * idx + 2] = p.z;
         x[4 * idx + 3] = 1.0;
     }
     for i in 0..n {
@@ -325,6 +369,74 @@ mod tests {
         let quats = infer(&weights, &input).unwrap();
         let want = Quat::new(1.0, 0.2, 0.0, 0.0).normalized();
         assert!(quats[0].approx_eq(want, 1e-12));
+    }
+
+    /// 1-bone linear net echoing the input position: out = (1, px, py, pz).
+    fn echo_weights(input_tag: Option<&str>) -> Weights {
+        let tag = input_tag
+            .map(|t| format!(r#""input": "{}","#, t))
+            .unwrap_or_default();
+        parse_weights(&format!(
+            r#"{{"format": "motionforge-weights", "version": 1, "bones": ["Hips"], {}
+            "layers": [{{"weights": [
+              [0,0,0,0,0], [1,0,0,0,0], [0,1,0,0,0], [0,0,1,0,0]],
+              "bias": [1, 0, 0, 0]}}]}}"#,
+            tag
+        ))
+        .unwrap()
+    }
+
+    fn effectors_at(pos: [f64; 3], root: Option<[f64; 3]>) -> EffectorInput {
+        let root = root
+            .map(|r| format!(r#""root_position": [{}, {}, {}],"#, r[0], r[1], r[2]))
+            .unwrap_or_default();
+        parse_effectors(&format!(
+            r#"{{"format": "motionforge-effectors", "version": 1, "skeleton": {}, {}
+            "effectors": [{{"bone": "Hips", "position": [{}, {}, {}]}}]}}"#,
+            skeleton_doc(),
+            root,
+            pos[0],
+            pos[1],
+            pos[2]
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn root_relative_inputs_ignore_where_the_character_stands() {
+        let rel = echo_weights(Some(INPUT_ROOT_RELATIVE));
+        assert!(rel.root_relative);
+        // Input is position minus root: (0.2, 0, 0).
+        let here = infer(&rel, &effectors_at([1.2, 3.0, 0.5], Some([1.0, 3.0, 0.5]))).unwrap();
+        assert!(here[0].approx_eq(Quat::new(1.0, 0.2, 0.0, 0.0).normalized(), 1e-12));
+        // The same pose 7 m away predicts the same rotation.
+        let there = infer(&rel, &effectors_at([8.2, 3.0, 0.5], Some([8.0, 3.0, 0.5]))).unwrap();
+        assert!(here[0].approx_eq(there[0], 1e-12));
+        // Absolute (legacy, tagged or untagged) weights still see the shift.
+        for abs in [echo_weights(Some(INPUT_ABSOLUTE)), echo_weights(None)] {
+            assert!(!abs.root_relative);
+            let a = infer(&abs, &effectors_at([1.2, 3.0, 0.5], Some([1.0, 3.0, 0.5]))).unwrap();
+            let b = infer(&abs, &effectors_at([8.2, 3.0, 0.5], Some([8.0, 3.0, 0.5]))).unwrap();
+            assert!(!a[0].approx_eq(b[0], 1e-3));
+        }
+    }
+
+    #[test]
+    fn root_relative_needs_root_position() {
+        let rel = echo_weights(Some(INPUT_ROOT_RELATIVE));
+        let err = infer(&rel, &effectors_at([0.2, 0.0, 0.0], None)).unwrap_err();
+        assert!(err.contains("root_position"), "{}", err);
+        // Absolute weights don't need it.
+        assert!(infer(&echo_weights(None), &effectors_at([0.2, 0.0, 0.0], None)).is_ok());
+        // Unknown encodings are refused, not guessed.
+        let err = parse_weights(
+            r#"{"format": "motionforge-weights", "version": 1, "bones": ["Hips"],
+            "input": "something-else",
+            "layers": [{"weights": [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]],
+              "bias": [1, 0, 0, 0]}]}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("input"), "{}", err);
     }
 
     #[test]

@@ -63,19 +63,46 @@ class TestEffectors(unittest.TestCase):
             ("B", "A", (0, 1, 0), (0, 2, 0)),
         ])
         heads = [(1.0, 2.0, 3.0), (4.0, 5.0, 6.0)]
-        x = dataset.build_input(skel, heads, [1])
+        x = dataset.build_input(skel, heads, [1], dataset.INPUT_ABSOLUTE)
         self.assertEqual(len(x), 5 * 2)
         self.assertEqual(x[0:4], [0.0, 0.0, 0.0, 0.0])
         self.assertEqual(x[4:8], [4.0, 5.0, 6.0, 1.0])
         self.assertEqual(x[8:], [1.0, 1.0])
+        # Default (new training): measured from the root's head.
+        x = dataset.build_input(skel, heads, [1])
+        self.assertEqual(x[4:8], [3.0, 3.0, 3.0, 1.0])
+        with self.assertRaises(ValueError):
+            dataset.build_input(skel, heads, [1], "nope")
+
+    def test_root_relative_input_ignores_where_the_character_stands(self):
+        skel, frames = dataset.load_clip(os.path.join(FIX, "walk_src.json"))
+        # The walk travels 1.2 m: first and last frames sit far apart.
+        a = dataset.fk(skel, frames[0])
+        moved = [(h[0] + 3.0, h[1] - 2.0, h[2] + 0.5) for h in a]
+        ids = [3, 5, 9]
+        for u, v in zip(dataset.build_input(skel, a, ids),
+                        dataset.build_input(skel, moved, ids)):
+            self.assertAlmostEqual(u, v, delta=1e-12)  # same up to rounding
+        self.assertNotEqual(dataset.build_input(skel, a, ids, dataset.INPUT_ABSOLUTE),
+                            dataset.build_input(skel, moved, ids, dataset.INPUT_ABSOLUTE))
 
 
 class TestInference(unittest.TestCase):
     def test_python_matches_rust_golden(self):
-        # Same weights + effectors as the Rust autopose golden: the
-        # pure-Python forward pass must agree with the Rust CLI output.
-        weights = inference.load_weights(os.path.join(FIX, "autopose_weights.json"))
-        with open(os.path.join(FIX, "autopose_effectors.json"), encoding="utf-8") as f:
+        # Same weights + effectors as the Rust autopose goldens (absolute
+        # and root-relative): the pure-Python forward pass must agree
+        # with the Rust CLI output.
+        for weights_name, effectors_name, golden in [
+            ("autopose_weights.json", "autopose_effectors.json", "autopose.0.json"),
+            ("autopose_weights_rootrel.json", "autopose_effectors_rootrel.json",
+             "autopose_rootrel.0.json"),
+        ]:
+            with self.subTest(golden=golden):
+                self._check_golden(weights_name, effectors_name, golden)
+
+    def _check_golden(self, weights_name, effectors_name, golden):
+        weights = inference.load_weights(os.path.join(FIX, weights_name))
+        with open(os.path.join(FIX, effectors_name), encoding="utf-8") as f:
             req = json.load(f)
         bones = [(b["name"], b["parent"], tuple(b["head"]), tuple(b["tail"]))
                  for b in req["skeleton"]["bones"]]
@@ -83,9 +110,11 @@ class TestInference(unittest.TestCase):
         index = {n: i for i, n in enumerate(skel.names)}
         pos = {index[e["bone"]]: tuple(e["position"]) for e in req["effectors"]}
         heads = [pos.get(i, (0.0, 0.0, 0.0)) for i in range(len(skel.names))]
-        x = dataset.build_input(skel, heads, list(pos))
+        if "root_position" in req:
+            heads[0] = pos.get(0, tuple(req["root_position"]))
+        x = dataset.build_input(skel, heads, list(pos), inference.input_tag_of(weights))
         got = inference.forward(weights, x)
-        with open(os.path.join(FIX, "golden", "autopose.0.json"), encoding="utf-8") as f:
+        with open(os.path.join(FIX, "golden", golden), encoding="utf-8") as f:
             rust = json.load(f)
         frame = rust["frames"][0]
         for i, name in enumerate(skel.names):
@@ -118,6 +147,17 @@ class TestInference(unittest.TestCase):
     def test_export_validates_shapes(self):
         with self.assertRaises(ValueError):
             inference.export_weights(["A"], [([[1.0]], [0.0])])
+
+    def test_export_tags_input_encoding(self):
+        layers = [([[0.0] * 5 for _ in range(4)], [1.0, 0.0, 0.0, 0.0])]
+        self.assertEqual(inference.export_weights(["A"], layers)["input"],
+                         dataset.INPUT_ROOT_RELATIVE)
+        doc = inference.export_weights(["A"], layers, dataset.INPUT_ABSOLUTE)
+        self.assertEqual(inference.input_tag_of(doc), dataset.INPUT_ABSOLUTE)
+        del doc["input"]  # pre-tag documents are absolute
+        self.assertEqual(inference.input_tag_of(doc), dataset.INPUT_ABSOLUTE)
+        with self.assertRaises(ValueError):
+            inference.export_weights(["A"], layers, "nope")
 
     def test_evaluate_with_limits(self):
         skel, frames = dataset.load_clip(os.path.join(FIX, "walk_src.json"))
