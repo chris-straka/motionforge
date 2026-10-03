@@ -119,6 +119,10 @@ def build_physics_args(command, input_path, output, params, frame=None):
             args.append("--no-ballistic")
         if not params.get("fix_momentum", True):
             args.append("--no-momentum")
+        if not params.get("fix_balance", True):
+            args.append("--no-balance")
+        if "max_lean_deg" in params:
+            args += ["--max-lean-deg", repr(params["max_lean_deg"])]
     return args
 
 
