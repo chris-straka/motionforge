@@ -7,13 +7,17 @@
 //!    apart plus any endpoint above threshold. This is the key
 //!    reduction: dense frames -> sparse keys.
 //! 2. Exaggerate: push each extreme rotation away from neutral,
-//!    `slerp(identity, q, factor)` with a per-chain factor. Locations
-//!    are never exaggerated (they carry root travel).
+//!    `slerp(identity, q, factor)` with a per-chain factor.
 //! 3. Anticipation: before each extreme with room, insert a counter-key
 //!    `anticipation_frames` earlier at `slerp(prev, extreme, -amount)`.
 //! 4. Retime: resample every frame between keys with holds (first `hold`
 //!    frames of each segment freeze) and snappy easing (ease-out cubic,
 //!    or ease-out-back scaled by `overshoot` for settle wobble).
+//!
+//! Steps 2-4 act on rotations only. Locations carry root travel and
+//! pass through unchanged on every frame: retiming them stretched a
+//! walk's whole travel over one eased segment (the root sprinted ahead,
+//! overshot, then walked backwards for a third of the clip).
 //!
 //! Output is a dense clip (same fps, same frame count) with editable
 //! baked keys; the report lists the key frames each bone kept.
@@ -239,7 +243,7 @@ pub fn stylize(clip: &Clip, params: &StylizeParams) -> Result<(Clip, StylizeRepo
                 let prev_pose = key_pose[b][prev].clone().unwrap();
                 let ext_pose = key_pose[b][e].clone().unwrap();
                 key_pose[b][at] = Some(Pose {
-                    loc: prev_pose.loc.lerp(ext_pose.loc, -params.anticipation),
+                    loc: clip.frames[at].poses[b].loc,
                     quat: prev_pose.quat.slerp(ext_pose.quat, -params.anticipation),
                 });
                 report.counters_added += 1;
@@ -247,11 +251,13 @@ pub fn stylize(clip: &Clip, params: &StylizeParams) -> Result<(Clip, StylizeRepo
         }
     }
 
-    // Resample each bone over its keys.
+    // Resample each bone's rotation over its keys; location is the
+    // source's, frame for frame.
     let mut out_frames = Vec::with_capacity(n);
     for f in 0..n {
         let mut poses = Vec::with_capacity(nb);
         for b in 0..nb {
+            let loc = clip.frames[f].poses[b].loc;
             // Bounding keys (endpoints always exist, so both are found).
             let mut k0 = 0;
             for k in 0..=f {
@@ -268,7 +274,7 @@ pub fn stylize(clip: &Clip, params: &StylizeParams) -> Result<(Clip, StylizeRepo
             }
             let p0 = key_pose[b][k0].clone().unwrap();
             if k0 == k1 {
-                poses.push(p0);
+                poses.push(Pose { loc, quat: p0.quat });
                 continue;
             }
             let p1 = key_pose[b][k1].clone().unwrap();
@@ -283,7 +289,7 @@ pub fn stylize(clip: &Clip, params: &StylizeParams) -> Result<(Clip, StylizeRepo
                 ease_back(u.clamp(0.0, 1.0), params.overshoot)
             };
             poses.push(Pose {
-                loc: p0.loc.lerp(p1.loc, e),
+                loc,
                 quat: p0.quat.slerp(p1.quat, e),
             });
         }
@@ -514,6 +520,27 @@ mod tests {
         let text = emit_keys(&clip.skeleton, &report);
         assert!(text.contains("\"motionforge-keys\""), "{}", text);
         assert!(text.contains("\"arm.L\": [0, 1, 2]"), "{}", text);
+    }
+
+    #[test]
+    fn locations_pass_through_unchanged() {
+        // Steady root travel under a swinging rotation: every rotation
+        // stage fires (extremes, anticipation, holds, overshoot), but
+        // travel must stay frame-for-frame the source's. Before the fix
+        // the walk fixture's root froze, sprinted, overshot its end and
+        // walked backwards on 15 of 47 frames.
+        let angles: Vec<f64> = (0..40).map(|i| 0.6 * (i as f64 * 0.3).sin()).collect();
+        let mut clip = swing_clip(&angles);
+        for (i, fr) in clip.frames.iter_mut().enumerate() {
+            fr.poses[0].loc = Vec3::new(0.0, 0.0, -0.025 * i as f64);
+        }
+        let (out, report) = stylize(&clip, &StylizeParams::default()).unwrap();
+        assert!(report.counters_added > 0 && report.keys_union.len() > 2);
+        for (a, b) in clip.frames.iter().zip(out.frames.iter()) {
+            assert_eq!(a.poses[0].loc, b.poses[0].loc);
+        }
+        // Rotations are still stylized.
+        assert!((0..40).any(|f| (angle_of(&out, f) - angles[f].abs()).abs() > 1e-3));
     }
 
     #[test]

@@ -7,7 +7,7 @@ the CLI outputs byte-for-byte.
 
 ## Rust suite
 
-- 61 unit + 9 contract tests green, zero warnings, fmt clean:
+- 62 unit + 9 contract tests green, zero warnings, fmt clean:
   `cd rust && cargo fmt --all --check && cargo test --locked --release`
   (2026-10-03, also on Linux x86_64 / glibc, rustc 1.97.0).
 - Cross-platform byte-determinism: before `detmath`, the stylize
@@ -76,6 +76,11 @@ the CLI outputs byte-for-byte.
   frames -> 14 keys, 13 counters added / 1 skipped.
 - Unit pins: 2x exaggeration 0.5 -> 1.0 rad; ease-out-back midpoint
   0.1088 vs 0.0875 without; holds exact; 2-frame clips exact.
+- Root travel (Hips loc, golden vs `walk_src.json`, 2026-10-03):
+  before, 15 of 47 steps backward, 2 frozen, steps up to 0.104 m
+  (4x the source) and a 0.046 m overshoot past the end; now identical
+  to the source on all 48 frames (steady -0.0255 m/frame). Rotations
+  in the golden byte-identical before/after; keys sidecar unchanged.
 
 ## Physics (fixture golden)
 

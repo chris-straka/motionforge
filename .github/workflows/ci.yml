@@ -24,7 +24,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Toolchain
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt
@@ -41,7 +41,7 @@ jobs:
       BLENDER_VERSION: "5.2.1"
       BLENDER_SERIES: "5.2"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build CLI
         working-directory: rust
         run: |
@@ -50,7 +50,7 @@ jobs:
           cargo build --locked --release --offline
       - name: Cache Blender
         id: cache-blender
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/blender
           key: blender-${{ env.BLENDER_VERSION }}-linux-x64
@@ -75,8 +75,8 @@ jobs:
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       # Stdlib-only suites (torch-dependent training is local-only).
