@@ -2,7 +2,7 @@
 
 Written 2026-10-01 for the coding agents who will build it. Goal: make
 game animation for HLL (a stylized action-adventure, Godot) fast for one
-person. Context: `~/Games/hll/tools/roadmap.md`, `asset-pipeline.md`
+person. Context: `~/Games/tools/roadmap.md`, `~/Games/tools/asset-pipeline.md`
 ("Animation" section). The rig is rigforge's (`~/SWE/rigforge`,
 Rigify-based, presets `hll_hero` and `hll_stalker`).
 
