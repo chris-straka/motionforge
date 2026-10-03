@@ -30,7 +30,10 @@ frame (no sparse tracks in v1).
 - `loc`/`quat` are the bone's pose transform relative to rest,
   expressed in the bone's parent-relative rest frame — Blender's
   `matrix_basis` decomposed into location + rotation quaternion
-  (`[w, x, y, z]`, unit length). Frame count >= 1, fps > 0.
+  (`[w, x, y, z]`, unit length). Frame count >= 1, 0 < fps <= 10000.
+  Coordinates (`head`, `tail`, `loc`) must satisfy |x| <= 1e6 m;
+  quaternions are normalized on load and must be neither zero nor so
+  large that their length overflows.
 - Forward kinematics: `M = P @ R @ B`, where `R` is the
   parent-relative rest matrix (from head/tail/parent, same convention
   as rigforge's `rest_parent_rel`), `B = T(loc) @ Q(quat)`, and `P`
