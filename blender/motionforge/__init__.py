@@ -240,15 +240,23 @@ class MOTIONFORGE_PG_params(bpy.types.PropertyGroup):
         description="Crossfade at ballistic-fix phase boundaries",
     )
     physics_smooth_sigma: FloatProperty(
-        name="Smooth Sigma", default=1.0, min=0.001,
+        name="Smooth Sigma", default=1.0, min=0.001, max=1000.0,
         description="Gaussian sigma (frames) for the momentum fix",
     )
     physics_smooth_pad: IntProperty(
-        name="Smooth Pad", default=2, min=0,
+        name="Smooth Pad", default=2, min=0, max=1000,
         description="Frames around each flag the momentum fix touches",
     )
     physics_fix_ballistic: BoolProperty(name="Fix Ballistic", default=True)
     physics_fix_momentum: BoolProperty(name="Fix Momentum", default=True)
+    physics_fix_balance: BoolProperty(
+        name="Fix Balance", default=True,
+        description="Lean the upper body to bring the COM over the support feet",
+    )
+    physics_max_lean_deg: FloatProperty(
+        name="Max Lean", default=8.0, min=0.1, max=45.0,
+        description="Total lean cap per frame for the balance fix (deg)",
+    )
 
     autopose_weights: StringProperty(
         name="Model",
@@ -408,6 +416,8 @@ def _physics_params(params):
         "smooth_pad": params.physics_smooth_pad,
         "fix_ballistic": params.physics_fix_ballistic,
         "fix_momentum": params.physics_fix_momentum,
+        "fix_balance": params.physics_fix_balance,
+        "max_lean_deg": params.physics_max_lean_deg,
     }
 
 
@@ -440,7 +450,7 @@ class MOTIONFORGE_OT_physics_check(bpy.types.Operator):
 class MOTIONFORGE_OT_physics_fix(bpy.types.Operator):
     bl_idname = "motionforge.physics_fix"
     bl_label = "Physics Fix"
-    bl_description = "Fix ballistic + momentum errors via the root curves"
+    bl_description = "Fix ballistic, momentum and balance errors via the root curves"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -643,6 +653,11 @@ class MOTIONFORGE_PT_panel(bpy.types.Panel):
         row = box.row()
         row.prop(params, "physics_fix_ballistic")
         row.prop(params, "physics_fix_momentum")
+        row = box.row()
+        row.prop(params, "physics_fix_balance")
+        sub = row.row()
+        sub.active = params.physics_fix_balance
+        sub.prop(params, "physics_max_lean_deg")
         row = box.row()
         row.operator("motionforge.physics_check", icon="VIEWZOOM")
         row.operator("motionforge.physics_fix", icon="PLAY")

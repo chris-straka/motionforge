@@ -75,11 +75,16 @@ impl Json {
     }
 }
 
+/// Maximum array/object nesting. Real files nest ~5 deep; the cap turns
+/// hostile input (`[[[[...`) into an error instead of a stack overflow.
+const MAX_DEPTH: usize = 512;
+
 struct Parser<'a> {
     bytes: &'a [u8],
     pos: usize,
     line: usize,
     col: usize,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -89,6 +94,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             line: 1,
             col: 1,
+            depth: 0,
         }
     }
 
@@ -129,8 +135,19 @@ impl<'a> Parser<'a> {
     fn parse_value(&mut self) -> Result<Json, String> {
         self.skip_ws();
         match self.peek() {
-            Some(b'{') => self.parse_object(),
-            Some(b'[') => self.parse_array(),
+            Some(b'{' | b'[') => {
+                if self.depth >= MAX_DEPTH {
+                    return Err(self.err("nesting too deep"));
+                }
+                self.depth += 1;
+                let v = if self.peek() == Some(b'{') {
+                    self.parse_object()
+                } else {
+                    self.parse_array()
+                };
+                self.depth -= 1;
+                v
+            }
             Some(b'"') => Ok(Json::Str(self.parse_string()?)),
             Some(b't') => self.parse_literal("true", Json::Bool(true)),
             Some(b'f') => self.parse_literal("false", Json::Bool(false)),
@@ -252,10 +269,19 @@ impl<'a> Parser<'a> {
                     _ => return Err(self.err("bad escape")),
                 },
                 Some(b) if b < 0x20 => return Err(self.err("control character in string")),
-                Some(_) => {
-                    // UTF-8 multi-byte passthrough: find the char boundary.
+                Some(b) => {
+                    // UTF-8 multi-byte passthrough: decode just this char
+                    // (width from the lead byte; validating the whole
+                    // remaining input here made long strings quadratic).
                     let start = self.pos - 1;
-                    let s = std::str::from_utf8(&self.bytes[start..])
+                    let width = match b {
+                        0x00..=0x7f => 1,
+                        0xc0..=0xdf => 2,
+                        0xe0..=0xef => 3,
+                        _ => 4,
+                    };
+                    let end = (start + width).min(self.bytes.len());
+                    let s = std::str::from_utf8(&self.bytes[start..end])
                         .map_err(|_| self.err("invalid utf-8"))?;
                     let ch = s.chars().next().ok_or_else(|| self.err("invalid utf-8"))?;
                     for _ in 1..ch.len_utf8() {
@@ -358,6 +384,24 @@ pub fn push_num(out: &mut String, v: f64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deep_nesting_is_an_error_not_a_stack_overflow() {
+        let ok = format!("{}{}", "[".repeat(MAX_DEPTH), "]".repeat(MAX_DEPTH));
+        assert!(parse(&ok).is_ok());
+        let deep = format!("{}{}", "[".repeat(200_000), "]".repeat(200_000));
+        assert!(parse(&deep).unwrap_err().contains("nesting too deep"));
+        let deep_obj = format!("{}1{}", "{\"a\":".repeat(100_000), "}".repeat(100_000));
+        assert!(parse(&deep_obj).unwrap_err().contains("nesting too deep"));
+    }
+
+    #[test]
+    fn long_non_ascii_strings_parse_in_linear_time() {
+        // Mixed 2-, 3- and 4-byte chars; quadratic before (~minutes).
+        let body = "é€😀a".repeat(100_000);
+        let v = parse(&format!("{{\"s\": \"{}\"}}", body)).unwrap();
+        assert_eq!(v.get("s").unwrap().as_str().unwrap(), body);
+    }
 
     #[test]
     fn roundtrip_nested() {

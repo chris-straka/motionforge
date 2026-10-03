@@ -104,7 +104,18 @@ class TestCliBuilders(unittest.TestCase):
         fix = cli.build_physics_args("physics-fix", "i", "o", params)
         self.assertIn("--no-momentum", fix)
         self.assertNotIn("--no-ballistic", fix)
+        self.assertNotIn("--no-balance", fix)
+        self.assertNotIn("--max-lean-deg", fix)
         self.assertIn("FL,FR", fix)
+        fix = cli.build_physics_args("physics-fix", "i", "o",
+                                     dict(params, fix_balance=False, max_lean_deg=12.5))
+        self.assertIn("--no-balance", fix)
+        self.assertEqual(fix[fix.index("--max-lean-deg") + 1], "12.5")
+        # Balance flags are fix-only; check/frame never get them.
+        check = cli.build_physics_args("physics-check", "i", None,
+                                       dict(params, fix_balance=False, max_lean_deg=12.5))
+        self.assertNotIn("--no-balance", check)
+        self.assertNotIn("--max-lean-deg", check)
 
     def test_parsers(self):
         self.assertEqual(cli.parse_chain_factors(""), [])

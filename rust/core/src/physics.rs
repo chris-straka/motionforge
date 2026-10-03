@@ -87,8 +87,13 @@ impl PhysicsParams {
         if self.accel_limit <= 0.0 || self.turn_deg <= 0.0 || self.min_turn_speed < 0.0 {
             return Err("accel/turn limits must be positive".to_string());
         }
-        if self.smooth_sigma <= 0.0 {
-            return Err("smooth-sigma must be positive".to_string());
+        // Upper bounds keep the smoothing loops (O(frames * sigma) and
+        // O(frames * pad)) from hanging on typos like 1e11.
+        if self.smooth_sigma <= 0.0 || self.smooth_sigma > 1000.0 {
+            return Err("smooth-sigma must be in (0, 1000] frames".to_string());
+        }
+        if self.smooth_pad > 1000 {
+            return Err("smooth-pad must be <= 1000 frames".to_string());
         }
         if self.max_lean_deg <= 0.0 || self.max_lean_deg > 45.0 {
             return Err("max-lean-deg must be in (0, 45]".to_string());
@@ -1017,6 +1022,19 @@ mod tests {
             skeleton,
             frames: vec![frame; frames],
         }
+    }
+
+    #[test]
+    fn smoothing_params_are_bounded() {
+        // Out-of-range values used to hang (O(frames * sigma / pad)).
+        let mut p = params();
+        assert!(p.validate().is_ok());
+        p.smooth_sigma = 1e11;
+        assert!(p.validate().unwrap_err().contains("smooth-sigma"));
+        p.smooth_sigma = 1000.0;
+        assert!(p.validate().is_ok());
+        p.smooth_pad = 99_999_999_999;
+        assert!(p.validate().unwrap_err().contains("smooth-pad"));
     }
 
     #[test]
