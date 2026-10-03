@@ -217,6 +217,17 @@ def main():
             for kp in fc.keyframe_points
         )
         check(frames[0] == 1 and frames[-1] == 8, "thinned keys span endpoints")
+        # Root travel passes through the stylizer unchanged and keeps a
+        # location key on every frame; static locations stay thinned.
+        check(fcurve_key_count(stylized, 'pose.bones["Root"].location', 1) == 8,
+              "moving root location keyed every frame")
+        check(fcurve_key_count(stylized, 'pose.bones["Mid"].location', 1) < 8,
+              "static location stays thinned")
+        travel = [kp.co.y for fc in all_fcurves(stylized)
+                  if fc.data_path == 'pose.bones["Root"].location' and fc.array_index == 1
+                  for kp in fc.keyframe_points]
+        check(all(abs(v - 0.1 * i) < 1e-6 for i, v in enumerate(travel)),
+              f"root travel unchanged ({[round(v, 3) for v in travel]})")
         check(
             all(kp.interpolation == "LINEAR" for fc in all_fcurves(stylized)
                 for kp in fc.keyframe_points),

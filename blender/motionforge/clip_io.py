@@ -164,11 +164,27 @@ def _set_linear(action, bone_names):
                 key.interpolation = "LINEAR"
 
 
+def moving_loc_bones(clip):
+    """Names of clip bones whose location changes across frames."""
+    frames = clip.get("frames", [])
+    if not frames:
+        return set()
+    first = frames[0]
+    return {
+        name for name in first
+        if any(fr.get(name, first[name])["loc"] != first[name]["loc"] for fr in frames[1:])
+    }
+
+
 def import_clip(arm_obj, clip, action_name, frame_start, keys=None):
     """Write a clip dict as keys on an armature; returns the action.
 
     keys is None (dense: every frame) or {bone name: [clip frame
-    indices]} for a thinned import (sparse, animator-friendly).
+    indices]} for a thinned import (sparse, animator-friendly). Thinning
+    applies to rotations; a bone whose location varies over the clip
+    (root travel) keeps a location key on every frame, since the
+    stylizer passes travel through unchanged and LINEAR keys at the
+    sparse frames would flatten it (e.g. the hips bob of a walk).
     Clip bones missing from the armature are an error; armature bones
     missing from the clip are left untouched (control rigs survive).
     """
@@ -201,21 +217,25 @@ def import_clip(arm_obj, clip, action_name, frame_start, keys=None):
         arm_obj.animation_data_create()
     arm_obj.animation_data.action = action
     key_map = keys.get("bones", {}) if keys is not None else None
+    moving = moving_loc_bones(clip) if key_map is not None else set()
     for i, frame in enumerate(frames):
         f = frame_start + i
         for bone in skeleton:
             name = bone["name"]
-            if key_map is not None and i not in key_map.get(name, []):
+            key_rot = key_map is None or i in key_map.get(name, [])
+            key_loc = key_rot or name in moving
+            if not key_loc:
                 continue
             pose = frame.get(name)
             if pose is None:
                 raise MotionforgeError(f"clip frame {i} misses bone '{name}'")
             pose_bone = arm_obj.pose.bones[name]
             pose_bone.location = pose["loc"]
-            w, x, y, z = pose["quat"]
-            pose_bone.rotation_quaternion = (w, x, y, z)
             pose_bone.keyframe_insert("location", frame=f)
-            pose_bone.keyframe_insert("rotation_quaternion", frame=f)
+            if key_rot:
+                w, x, y, z = pose["quat"]
+                pose_bone.rotation_quaternion = (w, x, y, z)
+                pose_bone.keyframe_insert("rotation_quaternion", frame=f)
     _set_linear(action, {b["name"] for b in skeleton})
     bpy.context.view_layer.update()
     return action
