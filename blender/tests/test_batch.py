@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """P3 pipeline test: synthetic BVH -> batch retarget -> manifest gate.
 
-Needs Blender + a built CLI; skips otherwise. Slow (~1-2 min, two
-headless Blender runs). Run: python3 -m unittest blender.tests.test_batch
-from the repo root (or discover; it self-skips without prerequisites).
+Needs Blender ($BLENDER, PATH, or the macOS app) + a built CLI; skips
+otherwise (MF_REQUIRE_BLENDER=1 turns the skip into a failure, for CI).
+Slow (~1-2 min, two headless Blender runs). Run: python3 -m unittest
+blender.tests.test_batch from the repo root.
 """
 
 import json
@@ -16,7 +17,9 @@ import unittest
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      "..", ".."))
-BLENDER = "/Applications/Blender.app/Contents/MacOS/Blender"
+# $BLENDER, else `blender` on PATH, else the owner's macOS install.
+BLENDER = (os.environ.get("BLENDER") or shutil.which("blender")
+           or "/Applications/Blender.app/Contents/MacOS/Blender")
 CLI = os.path.join(REPO, "rust", "target", "release", "motionforge")
 CLI_DEBUG = os.path.join(REPO, "rust", "target", "debug", "motionforge")
 
@@ -78,7 +81,8 @@ def have_prereqs():
     return os.path.isfile(BLENDER) and os.path.isfile(binary)
 
 
-@unittest.skipUnless(have_prereqs(), "needs Blender + built CLI")
+@unittest.skipUnless(have_prereqs() or os.environ.get("MF_REQUIRE_BLENDER"),
+                     "needs Blender + built CLI")
 class TestBatch(unittest.TestCase):
     def test_bvh_to_manifest(self):
         tmp = tempfile.mkdtemp(prefix="mf_batch_")
