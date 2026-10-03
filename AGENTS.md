@@ -25,8 +25,13 @@ behind it (`docs/measurements.md`).
   data by default — ask the owner before loosening any gate.
 - Determinism: the Rust core is byte-deterministic (same input bytes
   -> same output bytes). No hash-map iteration in output paths, no
-  timestamps or temp paths in outputs, no unseeded RNG. CLI contract
-  goldens pin this; regenerate deliberately and review the diff.
+  timestamps or temp paths in outputs, no unseeded RNG, and no
+  platform libm: call `motion_core::detmath::{sin, cos, sin_cos, asin,
+  acos, exp}` instead of the `f64` methods (Apple's and glibc's libm
+  differ in the last ulp; a unit test rejects `.sin()` & co. in core
+  code). `sqrt`, `floor`, `powi`, `to_degrees` are exact and fine. CLI
+  contract goldens pin this; regenerate deliberately and review the
+  diff.
 - Never launch GUI binaries without explicit user approval. Headless
   Blender (`--background --factory-startup`) is fine.
 - Blender binary: `/Applications/Blender.app/Contents/MacOS/Blender`.
@@ -49,7 +54,7 @@ behind it (`docs/measurements.md`).
   `UPDATE_GOLDENS=1 cargo test --locked --release -p motionforge`
   and review the diff before committing.
 - Blender smoke (headless, procedural armature, no rigforge needed):
-  `blender --background --factory-startup --python blender/tests/smoke.py`.
+  `blender --background --factory-startup --python blender/tests/test_headless.py`.
   With rigforge + a real clip, the live checks are in
   `docs/measurements.md`.
 - Manifest gate: `python3 tools/manifest.py --check data/manifest.json`

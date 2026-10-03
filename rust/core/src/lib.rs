@@ -5,6 +5,7 @@
 
 pub mod autopose;
 pub mod clip;
+pub mod detmath;
 pub mod json;
 pub mod limits;
 pub mod math;
