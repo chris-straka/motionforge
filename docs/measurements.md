@@ -7,7 +7,7 @@ the CLI outputs byte-for-byte.
 
 ## Rust suite
 
-- 56 unit + 9 contract tests green, zero warnings, fmt clean:
+- 59 unit + 9 contract tests green, zero warnings, fmt clean:
   `cd rust && cargo fmt --all --check && cargo test --locked --release`
   (2026-10-03, also on Linux x86_64 / glibc, rustc 1.97.0).
 - Cross-platform byte-determinism: before `detmath`, the stylize
@@ -23,6 +23,18 @@ the CLI outputs byte-for-byte.
   (within 2 ulp of the host libm on 80k inputs, pinned bit patterns,
   guard against platform libm calls in core code).
 - Offline build (zero crates): `cargo build --offline` (no network).
+- CI (`.github/workflows/ci.yml`) runs the suite above on Linux x86_64
+  and macOS arm64, plus the stdlib Python suites.
+- Robustness: a throwaway structured fuzzer (723 CLI runs over mutated
+  clips/skeletons/bone maps and edge-case flags, 2026-10-03) found a
+  stack-overflow abort on deeply nested JSON, a quadratic parse of
+  long non-ASCII strings (200k chars > 20 s), and hangs on
+  `--smooth-sigma 1e11` / `--smooth-pad 1e11`. Now: nesting capped at
+  512 (clean error), per-char UTF-8 decode (same 400k-char string in
+  the unit test parses instantly), smoothing flags bounded to 1000
+  frames. Re-run: no crashes, hangs or timeouts. Remaining: absurd
+  magnitudes (1e300 positions or fps) print `inf` in text reports;
+  output files still reject non-finite numbers.
 
 ## Blender-exactness
 

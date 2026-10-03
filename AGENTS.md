@@ -48,7 +48,9 @@ behind it (`docs/measurements.md`).
 ## Checks
 
 - `cd rust && cargo fmt --all --check && cargo test --locked --release`
-  must be green with zero warnings.
+  must be green with zero warnings. CI (`.github/workflows/ci.yml`)
+  runs it on Linux x86_64 and macOS arm64, so goldens must be
+  byte-identical on both.
 - CLI contract goldens (`rust/cli/tests/` + `tests/fixtures/`): after
   an intended CLI output change, regenerate with
   `UPDATE_GOLDENS=1 cargo test --locked --release -p motionforge`
