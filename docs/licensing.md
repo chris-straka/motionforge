@@ -22,7 +22,7 @@ half; the shipping half is owner procedure (provenance log).
 - Suno: commercial rights only for songs made while subscribed
   (Pro/Premier), per `asset-pipeline.md`.
 - Steam AI disclosure + provenance log: one row per shipped asset in
-  the game's log (see `~/Games/tools/asset-pipeline.md`).
+  the game's log (see `~/SWE/games/tools/asset-pipeline.md`).
 
 ## Tool licenses
 
