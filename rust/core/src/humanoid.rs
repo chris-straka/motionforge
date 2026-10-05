@@ -3,7 +3,8 @@
 //! Canonical names are rigforge's `hll_hero` deform bones (Rigify `DEF-*`
 //! naming), so clips made on the rigforge hero rig and clips retargeted
 //! by motionforge address the same bones. The table below is the bone
-//! set of rigforge's mobile game export (65 bones); its parents are the
+//! set of rigforge's mobile game export (65 bones) plus four twist/helper
+//! bones (`helpers.rs`: upper arms and thighs); its parents are the
 //! anatomical chain (thigh under the hips, arm under the shoulder),
 //! not Rigify's flat deform parenting, so local rotations mean the same
 //! thing on every character. Rigs keep whatever subset they have; the
@@ -39,12 +40,14 @@ pub fn canonical() -> Vec<(String, Option<String>)> {
         let s = |b: &str| format!("DEF-{}.{}", b, side);
         add(s("pelvis"), Some("DEF-spine".into()));
         add(s("thigh"), Some("DEF-spine".into()));
+        add(s("thigh_twist"), Some("DEF-spine".into()));
         add(s("shin"), Some(s("thigh")));
         add(s("foot"), Some(s("shin")));
         add(s("toe"), Some(s("foot")));
         add(s("breast"), Some("DEF-spine.003".into()));
         add(s("shoulder"), Some("DEF-spine.003".into()));
         add(s("upper_arm"), Some(s("shoulder")));
+        add(s("upper_arm_twist"), Some(s("shoulder")));
         add(s("forearm"), Some(s("upper_arm")));
         add(s("hand"), Some(s("forearm")));
         for palm in 1..=4 {
@@ -420,7 +423,7 @@ mod tests {
     #[test]
     fn canonical_parents_precede_children() {
         let table = canonical();
-        assert_eq!(table.len(), 65);
+        assert_eq!(table.len(), 69);
         for (i, (_, parent)) in table.iter().enumerate() {
             if let Some(p) = parent {
                 assert!(table[..i].iter().any(|(n, _)| n == p), "{} after child", p);

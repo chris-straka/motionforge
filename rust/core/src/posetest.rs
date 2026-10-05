@@ -231,6 +231,7 @@ pub fn pose_locals(rig: &Rig, map: &Mapping, spec: &PoseSpec) -> (Vec<Option<Trs
             locals[node] = Some(trs);
         }
     }
+    crate::helpers::drive(rig, &mut locals);
     (locals, skipped)
 }
 
@@ -288,6 +289,15 @@ pub fn build(
             Json::Arr(vec![Json::num(fwd.x), Json::num(fwd.y), Json::num(fwd.z)]),
         ),
         ("bones", Json::num(joints.len() as f64)),
+        (
+            "helpers",
+            Json::Arr(
+                crate::helpers::present(&rig)
+                    .iter()
+                    .map(|(h, _)| Json::str(&rig.names[*h]))
+                    .collect(),
+            ),
+        ),
     ]);
     Ok((out, report))
 }
@@ -307,6 +317,14 @@ pub fn clip_samples(
     for anim in Animation::load_all(animated)?.into_iter().take(max_clips) {
         for f in fractions {
             let mut locals = anim.sample(&rig, anim.duration * f);
+            // Clips without helper keys: show the helpers as the pipeline
+            // would bake them.
+            for (h, d) in crate::helpers::present(&rig) {
+                if locals[h].is_none() {
+                    let dl = locals[d].unwrap_or(rig.rest[d]);
+                    locals[h] = Some(crate::helpers::helper_local(&rig, h, d, dl));
+                }
+            }
             if let Some(h) = hips {
                 if let Some(trs) = locals[h].as_mut() {
                     let rest = rig.rest[h].t;

@@ -10,7 +10,9 @@
 //! works on glTF joints with arbitrary rest orientations (no zero-roll
 //! limit) and stays exact when the source has extra in-between bones.
 //! Root travel is scaled by the hip-height ratio. Unshared target bones
-//! keep their rest pose relative to their parent.
+//! keep their rest pose relative to their parent, except the twist/helper
+//! bones, which are keyed with their share of their driver's rotation
+//! (`helpers.rs`).
 //!
 //! Rest alignment: before the motion is applied, each target bone is
 //! turned (shortest arc) so its rest direction matches the source's, so
@@ -169,6 +171,11 @@ impl<'a> Transfer<'a> {
     pub fn new(src: &'a Mapped, tgt: &'a Mapped) -> Transfer<'a> {
         let mut shared = Vec::new();
         for (tnode, name) in &tgt.map.pairs {
+            // Helpers follow their driver by rule (`helpers.rs`), never
+            // the source's own helper.
+            if crate::helpers::is_helper(name) {
+                continue;
+            }
             if let Some(snode) = src.map.node_of(name) {
                 shared.push((*tnode, snode));
             }
@@ -279,7 +286,12 @@ pub fn retarget_clips(
             }
             used_names.push(name.clone());
             let mut times = Vec::with_capacity(frames);
-            let mut tracks: Vec<Vec<Trs>> = vec![Vec::with_capacity(frames); transfer.shared.len()];
+            // Driven nodes: the shared bones, then the twist/helpers baked
+            // from their drivers (the game needs no constraint code).
+            let helpers = crate::helpers::present(&tgt.rig);
+            let mut nodes: Vec<usize> = transfer.shared.iter().map(|(t, _)| *t).collect();
+            nodes.extend(helpers.iter().map(|(h, _)| *h));
+            let mut tracks: Vec<Vec<Trs>> = vec![Vec::with_capacity(frames); nodes.len()];
             let mut max_err: f64 = 0.0;
             for f in 0..frames {
                 let t = if frames > 1 {
@@ -288,10 +300,11 @@ pub fn retarget_clips(
                     0.0
                 };
                 times.push(t);
-                let (locals, err) = transfer.frame(&anim.sample(&src.rig, t));
+                let (mut locals, err) = transfer.frame(&anim.sample(&src.rig, t));
                 max_err = max_err.max(err);
-                for (k, (tnode, _)) in transfer.shared.iter().enumerate() {
-                    tracks[k].push(locals[*tnode].unwrap_or(tgt.rig.rest[*tnode]));
+                crate::helpers::drive(&tgt.rig, &mut locals);
+                for (k, node) in nodes.iter().enumerate() {
+                    tracks[k].push(locals[*node].unwrap_or(tgt.rig.rest[*node]));
                 }
             }
             let hips = tgt.map.node_of("DEF-spine");
@@ -299,14 +312,7 @@ pub fn retarget_clips(
                 .and_then(|h| transfer.shared.iter().position(|(t, _)| *t == h))
                 .map(|k| (tracks[k].last().unwrap().t - tracks[k][0].t).length())
                 .unwrap_or(0.0);
-            write_animation(
-                &mut out,
-                &name,
-                &times,
-                &transfer.shared.iter().map(|(t, _)| *t).collect::<Vec<_>>(),
-                &tracks,
-                hips,
-            )?;
+            write_animation(&mut out, &name, &times, &nodes, &tracks, hips)?;
             reports.push(ClipReport {
                 name,
                 source: label.clone(),

@@ -9,6 +9,7 @@ pub mod clip;
 pub mod detmath;
 pub mod fixture;
 pub mod glb;
+pub mod helpers;
 pub mod humanoid;
 pub mod json;
 pub mod limits;

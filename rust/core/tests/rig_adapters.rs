@@ -137,6 +137,8 @@ fn standardize_every_naming_style_keeps_the_mesh_in_place() {
             let heads_src = world_heads(&src);
             let map = map_rig(&Rig::from_doc(&src).unwrap());
             for (name, head) in world_heads(&out) {
+                // Twist/helper bones sit on their driver's joint.
+                let name = motion_core::helpers::driver_of(&name).unwrap_or(name);
                 let node = map.node_of(&name).unwrap();
                 let src_rig = Rig::from_doc(&src).unwrap();
                 assert!(src_rig.head(node).approx_eq(head, 1e-6), "{} moved", name);
@@ -185,7 +187,17 @@ fn standardize_maps_mixamo_names_and_merges_extras() {
         .iter()
         .any(|(a, b)| a == "mixamorig:LeftHandPinky4" && b == "DEF-hand.L"));
     assert!(report.merged.iter().any(|(a, _)| a == "Root"));
-    assert_eq!(report.joints_out, 24);
+    // 24 HLL bones + the four twist/helpers.
+    assert_eq!(report.joints_out, 28);
+    assert_eq!(
+        report.helpers,
+        vec![
+            "DEF-thigh_twist.L",
+            "DEF-upper_arm_twist.L",
+            "DEF-thigh_twist.R",
+            "DEF-upper_arm_twist.R"
+        ]
+    );
 }
 
 #[test]
@@ -402,4 +414,118 @@ fn retarget_aligns_rest_poses() {
         }
     }
     assert!(worst < 0.05, "bone directions differ by {} deg", worst);
+}
+
+/// Rotation of `node` relative to its parent, as a change from rest.
+fn local_delta(rig: &Rig, world: &[Affine], node: usize) -> motion_core::math::Quat {
+    let p = rig.parent[node].unwrap();
+    let posed = world[p].inverse().unwrap().mul(&world[node]).rotation();
+    let rest = rig.rest_world[p]
+        .inverse()
+        .unwrap()
+        .mul(&rig.rest_world[node])
+        .rotation();
+    posed.mul(rest.conj())
+}
+
+#[test]
+fn standardize_adds_unweighted_helpers_on_their_drivers() {
+    let body = humanoid(Naming::Mixamo, true, false).unwrap();
+    let (out, _) = done(standardize(&body, "humanoid").unwrap());
+    let out = Document::parse(&out.to_bytes().unwrap()).unwrap();
+    let rig = Rig::from_doc(&out).unwrap();
+    let skin = &rig.skins[0];
+    let ibm = out
+        .read_accessor(
+            out.array("skins")[0]
+                .get("inverseBindMatrices")
+                .unwrap()
+                .as_usize()
+                .unwrap(),
+        )
+        .unwrap();
+    let pairs = motion_core::helpers::present(&rig);
+    assert_eq!(pairs.len(), 4);
+    for (h, d) in pairs {
+        assert_eq!(rig.parent[h], rig.parent[d]);
+        assert!(rig.head(h).approx_eq(rig.head(d), 1e-9));
+        let (sh, sd) = (
+            skin.iter().position(|&j| j == h).unwrap(),
+            skin.iter().position(|&j| j == d).unwrap(),
+        );
+        assert_eq!(ibm[sh], ibm[sd]);
+        let extras = out.array("nodes")[h]
+            .get("extras")
+            .unwrap()
+            .get("hll_helper")
+            .unwrap();
+        assert_eq!(
+            extras.get("driver").unwrap().as_str(),
+            Some(rig.names[d].as_str())
+        );
+        assert_eq!(extras.get("share").unwrap().as_f64(), Some(0.5));
+        // No vertex weight yet (weightforge's fix assigns it).
+        let prim = &out.array("meshes")[0]
+            .get("primitives")
+            .unwrap()
+            .as_arr()
+            .unwrap()[0];
+        let attrs = prim.get("attributes").unwrap();
+        let j = out
+            .read_accessor(attrs.get("JOINTS_0").unwrap().as_usize().unwrap())
+            .unwrap();
+        let w = out
+            .read_accessor(attrs.get("WEIGHTS_0").unwrap().as_usize().unwrap())
+            .unwrap();
+        for (jr, wr) in j.iter().zip(&w) {
+            for c in 0..4 {
+                assert!(!(jr[c] as usize == sh && wr[c] > 0.0));
+            }
+        }
+    }
+}
+
+#[test]
+fn clips_and_poses_bake_half_the_driver_into_helpers() {
+    let src = humanoid(Naming::Mixamo, true, true).unwrap();
+    let body = humanoid(Naming::Plain, false, false).unwrap();
+    let (target, _) = done(standardize(&body, "humanoid").unwrap());
+    let (animated, _) = retarget_clips(&target, &[("walk".into(), src)], 30.0).unwrap();
+    let animated = Document::parse(&animated.to_bytes().unwrap()).unwrap();
+    let rig = Rig::from_doc(&animated).unwrap();
+    let anim = &Animation::load_all(&animated).unwrap()[0];
+    let keyed = anim.animated_nodes();
+    let pairs = motion_core::helpers::present(&rig);
+    let mut moved: f64 = 0.0;
+    for (h, d) in &pairs {
+        assert!(keyed.contains(h), "{} not keyed", rig.names[*h]);
+        for f in 0..31 {
+            let w = rig.world(&anim.sample(&rig, f as f64 / 30.0));
+            let (dh, dd) = (local_delta(&rig, &w, *h), local_delta(&rig, &w, *d));
+            // Twice the helper's turn is the driver's turn (same axis).
+            assert!(
+                dh.mul(dh).angle_to(dd) < 1e-4,
+                "{} frame {}",
+                rig.names[*h],
+                f
+            );
+            moved = moved.max(dd.angle_to(motion_core::math::Quat::IDENTITY));
+        }
+    }
+    assert!(moved > 0.2, "walk barely moves the limbs ({moved} rad)");
+    // Pose sheet: arms up 70 turns each upper arm helper 35 degrees.
+    let (posed, _) = posetest::build(&target, &[]).unwrap();
+    let posed = Document::parse(&posed.to_bytes().unwrap()).unwrap();
+    let prig = Rig::from_doc(&posed).unwrap();
+    let up = Animation::load_all(&posed)
+        .unwrap()
+        .into_iter()
+        .find(|a| a.name.contains("arms up"))
+        .unwrap();
+    let w = prig.world(&up.sample(&prig, 0.0));
+    let h = prig.find("DEF-upper_arm_twist.L").unwrap();
+    let deg = local_delta(&prig, &w, h)
+        .angle_to(motion_core::math::Quat::IDENTITY)
+        .to_degrees();
+    assert!((deg - 35.0).abs() < 0.01, "helper turned {deg}");
 }

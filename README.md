@@ -52,7 +52,11 @@ motionforge adapter standardize|animate|pose-test IN.glb OUT.glb RESULT.json [fl
 ```
 
 The GLB commands and the genforge `adapter` contract are in
-`docs/adapters.md` (HLL humanoid skeleton, mapping rules, limits).
+`docs/adapters.md` (HLL humanoid skeleton, mapping rules, limits). The
+skeleton has twist/helper bones at the upper arms and thighs
+(`DEF-upper_arm_twist.L` ...): standardize adds them, animate and
+pose-test key them with half their driver's rotation, so the game needs
+no constraint code.
 
 Reports go to stdout (deterministic, golden-pinned); files only to
 `--output`; `--time` prints wall ms to stderr. Formats:

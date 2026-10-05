@@ -45,6 +45,18 @@ subset it has; animation needs the 14-bone core (`humanoid::REQUIRED`:
 hips, head, both arms to the hand, both legs to the foot). Extra
 rigforge bones (face, twists) stay when already `DEF-` named.
 
+**Twist/helper bones** (2026-10-05, `helpers.rs`): `DEF-upper_arm_twist.L/R`
+and `DEF-thigh_twist.L/R`. Each sits on its driver's joint (same head,
+same rest orientation), hangs from the driver's parent (shoulder, hips)
+and turns by half (`SHARE` 0.5) of the driver's rotation relative to that
+parent, swing and twist alike. Why half the whole rotation and not a
+classic counter-roll twist bone: the poses that fail weightforge's gate
+(arm up, arm forward, hip forward) are pure swings with zero roll, so a
+roll-only bone does nothing there; a half-swing joint lets the armpit and
+groin blend over two 45 deg steps instead of one 90 deg step. Nodes carry
+`extras.hll_helper = {"driver", "share"}`. The 69-bone canonical table
+lists them after their driver's siblings.
+
 Why motionforge and not rigforge: standardizing is what makes clips
 shareable, and it needs the same bone knowledge as retargeting; it is a
 pure GLB rewrite (no Blender), so it belongs in the deterministic Rust
@@ -68,6 +80,12 @@ rerig is the `repair-rig` adapter).
    the nearest kept ancestor (else the nearest kept joint). Each vertex
    keeps its 4 largest influences, renormalized.
 5. Old animations are dropped (authored for the old hierarchy).
+6. Missing twist/helpers are added (humanoids): a node per helper at its
+   driver's joint, appended last to the skin with the driver's inverse
+   bind matrix, **with no weight**. weightforge's fix weights them when
+   the deformation check needs it (its `helper-band` candidates); until
+   then they change nothing. `RESULT.json` lists them (`helpers_added`).
+   Standardizing twice gives the same file (helpers are found by name).
 
 Non-humanoids (`--class quadruped|custom`) keep their skeleton and only
 gain the `DEF-` prefix the rig contract (rfcheck) requires.
@@ -80,7 +98,10 @@ world rotation change from rest is applied to the target bone's world
 rest rotation, after a yaw fix when the rigs face different ways
 (facing = heel-to-toe direction, glTF +Y up), then expressed under the
 target's posed parent. Hips travel scales by the hip-height ratio.
-Unshared target bones keep their rest pose relative to their parent.
+Unshared target bones keep their rest pose relative to their parent,
+except the twist/helpers: every clip keys them with half their driver's
+rotation (`helpers::drive`), so the game plays them as ordinary joints
+with no constraint code (test: `clips_and_poses_bake_half_the_driver_into_helpers`).
 This is `retarget.rs`'s transfer (`d_t = C d C^-1`) on glTF joints with
 arbitrary rest orientations (no zero-roll limit), and it stays exact
 when the source has extra in-between bones. Rest alignment comes first:
@@ -103,7 +124,9 @@ shrug/wrists/fists, arms back 40, knee up 90/110, lunge, legs out 45,
 bend forward 45, lean left 30, twist 40 + head 35, plus rest), in the
 spirit of weightforge's ROM set: bend a bone toward a character
 direction or twist it, applied in the bone's rest frame on top of its
-parent. With `--clips`, two frames each (25%, 60%) of up to three
+parent. Helpers are driven the same way as in clips
+(clip samples without helper keys get them too), the report lists them
+(`helpers`), and `pose-test.glb` keys them. With `--clips`, two frames each (25%, 60%) of up to three
 retargeted clips join the sheet. Every pose is a one-key animation with
 all joints keyed; `pose_sheet.py` renders each as an orthographic
 three-quarter tile (EEVEE, 320x400) with its label and packs a
@@ -134,3 +157,10 @@ six-column PNG.
   adapters ran inside the chain on real files: standardize, pose-test
   (gate) and animate (9 game clips, then idle/walk/run), through the
   post-animation recheck to delivery.
+- Twist/helpers (2026-10-05): `cargo test --locked --release` is 72 core
+  unit + 13 rig-adapter + 3 adapter contract + 10 CLI goldens. On the
+  SkinTokens rig of the Andras game mesh (5,766 verts) standardize gives
+  22 + 4 helper joints; weightforge with the helpers scores 47.6 raw ->
+  68.8 after `weights fix` (2 failing regions left) vs 47.3 -> 62.8 (4)
+  without them. Numbers and sheets: weightforge README, "Twist/helper
+  bones".

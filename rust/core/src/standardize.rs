@@ -6,7 +6,9 @@
 //! valid and the mesh does not move), joints with no canonical
 //! counterpart leave the skin and hand their weights to the nearest
 //! kept ancestor, and old animations are dropped (they were authored
-//! for the old hierarchy; `animate` adds retargeted ones).
+//! for the old hierarchy; `animate` adds retargeted ones). Last, the
+//! twist/helper bones are added at the upper arms and thighs
+//! (`helpers.rs`), unweighted until weightforge's fix needs them.
 //!
 //! Other classes keep their own skeleton; joints only get the `DEF-`
 //! prefix the rig contract requires.
@@ -28,6 +30,8 @@ pub struct Report {
     pub missing: Vec<String>,
     pub animations_dropped: usize,
     pub vertices: usize,
+    /// Twist/helper bones added (`helpers.rs`).
+    pub helpers: Vec<String>,
 }
 
 impl Report {
@@ -55,6 +59,10 @@ impl Report {
                 Json::num(self.animations_dropped as f64),
             ),
             ("skinned_vertices", Json::num(self.vertices as f64)),
+            (
+                "helpers_added",
+                Json::Arr(self.helpers.iter().map(|m| Json::str(m)).collect()),
+            ),
         ])
     }
 }
@@ -261,7 +269,20 @@ fn humanoid_standardize(doc: &Document, rig: &Rig) -> Result<Outcome, String> {
 
     // Rebuild every skin with the kept joints (canonical order) and
     // remap each skinned primitive's weights.
-    let new_joints: Vec<usize> = kept.clone();
+    // Helpers last, as `helpers::insert` adds them, so standardizing twice
+    // gives the same skin.
+    let mut new_joints: Vec<usize> = map
+        .pairs
+        .iter()
+        .filter(|(_, c)| !crate::helpers::is_helper(c))
+        .map(|(n, _)| *n)
+        .collect();
+    new_joints.extend(
+        map.pairs
+            .iter()
+            .filter(|(_, c)| crate::helpers::is_helper(c))
+            .map(|(n, _)| *n),
+    );
     let mut skin_ibm_rows: Vec<Vec<f64>> = Vec::new();
     for &j in &new_joints {
         skin_ibm_rows.push(original_ibm(doc, rig, j)?.to_gltf_matrix());
@@ -399,7 +420,10 @@ fn humanoid_standardize(doc: &Document, rig: &Rig) -> Result<Outcome, String> {
     }
     report.animations_dropped = doc.array("animations").len();
     out.json.remove("animations");
-    report.joints_out = new_joints.len();
+    // Twist/helper bones at the upper arms and thighs (no weight yet).
+    let inserted = crate::helpers::insert(&mut out)?;
+    report.joints_out = new_joints.len() + inserted.bones.len();
+    report.helpers = inserted.bones;
     Ok(Outcome::Done(out, report))
 }
 
