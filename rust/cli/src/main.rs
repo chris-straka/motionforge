@@ -1,4 +1,5 @@
-// motionforge CLI: retarget, stylize, physics-check/fix, autopose, clip-info.
+// motionforge CLI: retarget, stylize, physics-check/fix, autopose, clip-info,
+// and the GLB rig commands + genforge adapter (glb_cmds.rs).
 //
 // Reports go to stdout (deterministic, golden-pinned); warnings, errors,
 // and --time diagnostics go to stderr. Files are written only to
@@ -16,6 +17,8 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::time::Instant;
 
+mod glb_cmds;
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HELP: &str = "motionforge {VERSION} — game-animation sidekick for HLL\n\
@@ -30,6 +33,11 @@ commands:\n\
   physics-fix    fix ballistic + momentum errors via root curves\n\
   autopose       predict a full pose from a few effector joints\n\
   clip-info      validate a clip and print its inventory\n\
+  standardize    rig GLB -> HLL skeleton (DEF-* names, canonical parents)\n\
+  animate        retarget clip GLBs onto a rigged GLB\n\
+  pose-test      range-of-motion poses as animations (+ rendered sheet)\n\
+  fixture-glb    procedural skinned test humanoid GLB\n\
+  adapter        genforge character-chain adapter (adapter --help)\n\
 \n\
 retarget flags:\n\
   --source <clip> --target <skeleton|clip> --map <bonemap> --output <clip>\n\
@@ -66,6 +74,18 @@ autopose flags:\n\
 \n\
 clip-info flags:\n\
   --input <clip> [--emit-skeleton <skeleton>]\n\
+\n\
+standardize flags:\n\
+  --input <glb> --output <glb> [--class humanoid|quadruped|custom] [--report <json>]\n\
+\n\
+animate flags:\n\
+  --input <glb> --output <glb> --clips <glb|folder> (repeatable) [--fps 30]\n\
+\n\
+pose-test flags:\n\
+  --input <glb> --output <posed glb> [--sheet <png>] [--clips ...] [--blender <path>]\n\
+\n\
+fixture-glb flags:\n\
+  --output <glb> [--naming mixamo|plain|def] [--twisted] [--walk]\n\
 \n\
 global: --help/-h, --version/-v, --time (wall ms on stderr)\n";
 
@@ -107,6 +127,8 @@ fn is_bool_flag(key: &str) -> bool {
             | "no-ballistic"
             | "no-momentum"
             | "no-balance"
+            | "twisted"
+            | "walk"
             | "time"
             | "help"
             | "h"
@@ -591,6 +613,10 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "physics-fix" => cmd_physics_fix(&args),
             "autopose" => cmd_autopose(&args),
             "clip-info" => cmd_clip_info(&args),
+            "standardize" => glb_cmds::cmd_standardize(&args),
+            "animate" => glb_cmds::cmd_animate(&args),
+            "pose-test" => glb_cmds::cmd_pose_test(&args),
+            "fixture-glb" => glb_cmds::cmd_fixture_glb(&args),
             other => Err((1, format!("unknown command '{}'; try --help", other))),
         },
         Err(e) => Err(e),
@@ -609,6 +635,11 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("adapter") {
+        let code = glb_cmds::adapter_main(&argv[1..]);
+        std::io::stdout().flush().ok();
+        std::process::exit(code);
+    }
     let (code, report) = real_main(&argv);
     if let Some(text) = report {
         print!("{}", text);

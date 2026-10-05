@@ -63,6 +63,61 @@ impl Json {
         matches!(self, Json::Null)
     }
 
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Json> {
+        match self {
+            Json::Obj(pairs) => pairs.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+
+    /// Set `key` on an object (replacing in place, else appending).
+    /// No-op on non-objects.
+    pub fn set(&mut self, key: &str, value: Json) {
+        if let Json::Obj(pairs) = self {
+            match pairs.iter_mut().find(|(k, _)| k == key) {
+                Some(slot) => slot.1 = value,
+                None => pairs.push((key.to_string(), value)),
+            }
+        }
+    }
+
+    /// Remove `key` from an object, returning its value.
+    pub fn remove(&mut self, key: &str) -> Option<Json> {
+        match self {
+            Json::Obj(pairs) => {
+                let i = pairs.iter().position(|(k, _)| k == key)?;
+                Some(pairs.remove(i).1)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn as_arr_mut(&mut self) -> Option<&mut Vec<Json>> {
+        match self {
+            Json::Arr(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    pub fn as_usize(&self) -> Option<usize> {
+        match self {
+            Json::Num(v) if *v >= 0.0 && v.fract() == 0.0 && *v <= 9.0e15 => Some(*v as usize),
+            _ => None,
+        }
+    }
+
+    pub fn num(v: f64) -> Json {
+        Json::Num(v)
+    }
+
+    pub fn str(s: &str) -> Json {
+        Json::Str(s.to_string())
+    }
+
+    pub fn obj(pairs: Vec<(&str, Json)>) -> Json {
+        Json::Obj(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Json::Null => "null",
@@ -381,6 +436,86 @@ pub fn push_num(out: &mut String, v: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// Emit a [`Json`] tree compactly (object key order preserved).
+pub fn emit(value: &Json) -> Result<String, String> {
+    let mut out = String::new();
+    emit_into(&mut out, value, None, 0)?;
+    Ok(out)
+}
+
+/// Emit a [`Json`] tree with two-space indentation and a final newline.
+pub fn emit_pretty(value: &Json) -> Result<String, String> {
+    let mut out = String::new();
+    emit_into(&mut out, value, Some(2), 0)?;
+    out.push('\n');
+    Ok(out)
+}
+
+fn newline(out: &mut String, indent: Option<usize>, depth: usize) {
+    if let Some(n) = indent {
+        out.push('\n');
+        for _ in 0..n * depth {
+            out.push(' ');
+        }
+    }
+}
+
+fn emit_into(
+    out: &mut String,
+    value: &Json,
+    indent: Option<usize>,
+    depth: usize,
+) -> Result<(), String> {
+    match value {
+        Json::Null => out.push_str("null"),
+        Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Json::Num(v) => push_num(out, *v)?,
+        Json::Str(s) => push_str(out, s),
+        Json::Arr(items) => {
+            out.push('[');
+            let scalar = items
+                .iter()
+                .all(|v| !matches!(v, Json::Arr(_) | Json::Obj(_)));
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                    if indent.is_some() && scalar {
+                        out.push(' ');
+                    }
+                }
+                if !scalar {
+                    newline(out, indent, depth + 1);
+                }
+                emit_into(out, item, indent, depth + 1)?;
+            }
+            if !scalar && !items.is_empty() {
+                newline(out, indent, depth);
+            }
+            out.push(']');
+        }
+        Json::Obj(pairs) => {
+            out.push('{');
+            for (i, (k, v)) in pairs.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                newline(out, indent, depth + 1);
+                push_str(out, k);
+                out.push(':');
+                if indent.is_some() {
+                    out.push(' ');
+                }
+                emit_into(out, v, indent, depth + 1)?;
+            }
+            if !pairs.is_empty() {
+                newline(out, indent, depth);
+            }
+            out.push('}');
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,6 +556,18 @@ mod tests {
         assert!(parse(r#"{"a": NaN}"#).is_err());
         assert!(parse("\"unterminated").is_err());
         assert!(parse("[1,]".to_string().leak()).is_err());
+    }
+
+    #[test]
+    fn emit_roundtrips_and_edits() {
+        let doc = r#"{"a": [1, -2.5, 1e3, true, false, null], "b": {"c": "x\ny\"q\""}}"#;
+        let mut v = parse(doc).unwrap();
+        assert_eq!(parse(&emit(&v).unwrap()).unwrap(), v);
+        assert_eq!(parse(&emit_pretty(&v).unwrap()).unwrap(), v);
+        v.set("d", Json::num(3.0));
+        v.get_mut("b").unwrap().set("c", Json::str("z"));
+        assert_eq!(v.remove("a").unwrap().as_arr().unwrap().len(), 6);
+        assert_eq!(emit(&v).unwrap(), r#"{"b":{"c":"z"},"d":3}"#);
     }
 
     #[test]
