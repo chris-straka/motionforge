@@ -145,7 +145,41 @@ fn twist_of(i: usize) -> Quat {
 }
 
 pub fn humanoid(naming: Naming, twisted: bool, walk: bool) -> Result<Document, String> {
-    let lay = layout();
+    humanoid_posed(naming, twisted, walk, 0.0)
+}
+
+/// Like [`humanoid`], with the arms lowered `arms_down` degrees from the
+/// T-pose about each shoulder (45 = A-pose).
+pub fn humanoid_posed(
+    naming: Naming,
+    twisted: bool,
+    walk: bool,
+    arms_down: f64,
+) -> Result<Document, String> {
+    let mut lay = layout();
+    if arms_down != 0.0 {
+        for side in ["L", "R"] {
+            let pivot_role = format!("upper_arm.{}", side);
+            let pivot = lay
+                .iter()
+                .find(|(r, _, _)| *r == pivot_role)
+                .map(|(_, _, h)| *h)
+                .unwrap();
+            let sign = if side == "L" { -1.0 } else { 1.0 };
+            let q = Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), sign * arms_down.to_radians());
+            for (role, _, head) in lay.iter_mut() {
+                let arm = ["forearm", "hand", "middle1", "extra"]
+                    .iter()
+                    .any(|b| *role == format!("{}.{}", b, side));
+                if arm {
+                    let p = Vec3::new(head[0] - pivot[0], head[1] - pivot[1], head[2] - pivot[2]);
+                    let r = q.rotate_vec(p);
+                    *head = [pivot[0] + r.x, pivot[1] + r.y, pivot[2] + r.z];
+                }
+            }
+        }
+    }
+    let lay = lay;
     let idx = |role: &str| lay.iter().position(|(r, _, _)| *r == role).unwrap();
     let n = lay.len();
     let mut doc = Document {

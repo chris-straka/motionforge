@@ -363,3 +363,43 @@ fn pose_sheet_takes_clip_samples() {
     let (posed, _) = posetest::build(&target, &samples).unwrap();
     assert_eq!(Animation::load_all(&posed).unwrap().len(), 14);
 }
+
+/// A clip made on an A-pose rig must keep its bone directions on a
+/// T-pose rig (rest alignment), not lift the arms by the rest difference.
+#[test]
+fn retarget_aligns_rest_poses() {
+    use motion_core::fixture::humanoid_posed;
+    let src = humanoid_posed(Naming::Mixamo, false, true, 45.0).unwrap();
+    let body = humanoid(Naming::Plain, true, false).unwrap(); // T-pose, twisted joints
+    let (target, _) = done(standardize(&body, "humanoid").unwrap());
+    let (animated, reports) =
+        retarget_clips(&target, &[("apose-walk".into(), src.clone())], 30.0).unwrap();
+    assert!(
+        reports[0].max_error_deg < 1e-4,
+        "{}",
+        reports[0].max_error_deg
+    );
+    let s = Mapped::new(&src).unwrap();
+    let t = Mapped::new(&animated).unwrap();
+    let sa = &Animation::load_all(&src).unwrap()[0];
+    let ta = &Animation::load_all(&animated).unwrap()[0];
+    let dir = |m: &Mapped, w: &[Affine], a: &str, b: &str| {
+        let (a, b) = (m.map.node_of(a).unwrap(), m.map.node_of(b).unwrap());
+        (w[b].t - w[a].t).normalized()
+    };
+    let mut worst: f64 = 0.0;
+    for f in [0, 7, 15, 22, 30] {
+        let time = f as f64 / 30.0;
+        let sw = s.rig.world(&sa.sample(&s.rig, time));
+        let tw = t.rig.world(&ta.sample(&t.rig, time));
+        for (a, b) in [
+            ("DEF-upper_arm.L", "DEF-forearm.L"),
+            ("DEF-forearm.R", "DEF-hand.R"),
+            ("DEF-thigh.L", "DEF-shin.L"),
+        ] {
+            let cos = dir(&s, &sw, a, b).dot(dir(&t, &tw, a, b)).clamp(-1.0, 1.0);
+            worst = worst.max(cos.acos().to_degrees());
+        }
+    }
+    assert!(worst < 0.05, "bone directions differ by {} deg", worst);
+}

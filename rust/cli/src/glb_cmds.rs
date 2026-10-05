@@ -229,6 +229,14 @@ fn render_sheet(
         2,
         "Blender not found (set --blender or BLENDER_BIN)".to_string(),
     ))?;
+    // Blender resolves relative paths against the blend file, not the cwd.
+    let abs = |p: &str| {
+        std::path::absolute(p)
+            .map(|a| a.to_string_lossy().to_string())
+            .unwrap_or_else(|_| p.to_string())
+    };
+    let (posed_glb, sheet) = (abs(posed_glb), abs(sheet));
+    let (posed_glb, sheet) = (posed_glb.as_str(), sheet.as_str());
     let script =
         std::env::temp_dir().join(format!("motionforge-pose-sheet-{}.py", std::process::id()));
     std::fs::write(&script, POSE_SHEET_PY)

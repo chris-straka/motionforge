@@ -269,4 +269,28 @@ fn pose_test_renders_a_sheet_and_passes_the_model_on() {
         .unwrap()
         .len();
     assert_eq!(poses, 14);
+
+    // Relative paths from another working directory (how a shell user calls it).
+    let rel = dir.join("rel");
+    std::fs::create_dir_all(&rel).unwrap();
+    let out = Command::new(bin())
+        .current_dir(&rel)
+        .args([
+            "adapter",
+            "pose-test",
+            s(&dir.join("def.glb")),
+            "output.glb",
+            "result.json",
+            "--blender",
+            s(&blender),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(rel.join("pose-sheet.png").is_file());
 }

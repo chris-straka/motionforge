@@ -47,7 +47,9 @@ def parse_args():
     if forward.length < 1e-6:
         forward = Vector((0.0, -1.0, 0.0))
     forward.normalize()
-    return argv[0], argv[1], forward, int(opts["cols"]), tw, th, opts["title"]
+    # Blender resolves relative paths against the blend file, not the cwd.
+    src, out = os.path.abspath(argv[0]), os.path.abspath(argv[1])
+    return src, out, forward, int(opts["cols"]), tw, th, opts["title"]
 
 
 def reset_scene():

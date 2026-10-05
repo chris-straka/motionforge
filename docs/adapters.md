@@ -83,7 +83,12 @@ target's posed parent. Hips travel scales by the hip-height ratio.
 Unshared target bones keep their rest pose relative to their parent.
 This is `retarget.rs`'s transfer (`d_t = C d C^-1`) on glTF joints with
 arbitrary rest orientations (no zero-roll limit), and it stays exact
-when the source has extra in-between bones. Each clip reports a
+when the source has extra in-between bones. Rest alignment comes first:
+each target bone is turned (shortest arc, toward the first child both
+rigs have) so its rest direction matches the source's, so a clip made on
+an A-pose rig plays with the same bone directions on a T-pose rig
+instead of lifting its arms by the 45 deg rest difference (test:
+`retarget_aligns_rest_poses`, directions within 0.05 deg). Each clip reports a
 self-check (`max_error_deg`, world rotation mismatch; the adapter fails
 above 0.5 deg) and root travel. Clip names are kept (`-2` on clashes).
 
@@ -107,7 +112,7 @@ six-column PNG.
 ## Measurements (2026-10-05, M4, Blender 5.2.1)
 
 - Tests: `cd rust && cargo test --locked --release`: 71 core unit +
-  10 rig-adapter (`core/tests/rig_adapters.rs`) + 3 adapter contract
+  11 rig-adapter (`core/tests/rig_adapters.rs`) + 3 adapter contract
   (`cli/tests/adapter_contract.rs`, the pose-sheet case renders with
   real Blender when present, ~20 s) + 10 CLI goldens.
 - Fixture coverage (`motionforge fixture-glb`): Mixamo, plain and `DEF`
@@ -121,4 +126,11 @@ six-column PNG.
   finger joints merged into the hands, 0 reparents needed; animate
   retargets all 9 clips with max self-check error 0.0001 deg; output
   passes rfcheck's contract (budget warnings only: verts, texture
-  size, no normal map).
+  size, no normal map). Its pose-test sheet (12 ROM poses + 6 attack
+  clip samples, textured, ~25 s with Blender) shows wrist creasing,
+  elbow pinch and knee crumple at the extremes: the deformation the
+  owner approves or sends back.
+- In genforge's rehearsal mode (genforge `docs/phase-7.md`) all three
+  adapters ran inside the chain on real files: standardize, pose-test
+  (gate) and animate (9 game clips, then idle/walk/run), through the
+  post-animation recheck to delivery.

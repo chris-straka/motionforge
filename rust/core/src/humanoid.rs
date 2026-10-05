@@ -101,6 +101,45 @@ pub fn present_parent(name: &str, present: &dyn Fn(&str) -> bool) -> Option<Stri
     None
 }
 
+/// Canonical bones whose head defines `name`'s direction, best first
+/// (upper arm -> forearm, hand -> middle finger, spine.001 -> spine.002 ...).
+pub fn main_children(name: &str) -> Vec<String> {
+    let side = if name.ends_with(".L") { "L" } else { "R" };
+    match name
+        .trim_start_matches("DEF-")
+        .trim_end_matches(".L")
+        .trim_end_matches(".R")
+    {
+        "shoulder" => vec![format!("DEF-upper_arm.{}", side)],
+        "upper_arm" => vec![format!("DEF-forearm.{}", side)],
+        "forearm" => vec![format!("DEF-hand.{}", side)],
+        "hand" => vec![
+            format!("DEF-f_middle.01.{}", side),
+            format!("DEF-f_index.01.{}", side),
+        ],
+        "thigh" => vec![format!("DEF-shin.{}", side)],
+        "shin" => vec![format!("DEF-foot.{}", side)],
+        "foot" => vec![format!("DEF-toe.{}", side)],
+        "spine" => (1..=6).map(|j| format!("DEF-spine.{:03}", j)).collect(),
+        other => {
+            if let Some(rest) = other.strip_prefix("spine.") {
+                let k: usize = rest.parse().unwrap_or(6);
+                (k + 1..=6).map(|j| format!("DEF-spine.{:03}", j)).collect()
+            } else if other.starts_with("thumb") || other.starts_with("f_") {
+                let seg: usize = other
+                    .rsplit('.')
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(3);
+                let base = other.rsplit_once('.').map(|(b, _)| b).unwrap_or(other);
+                vec![format!("DEF-{}.{:02}.{}", base, seg + 1, side)]
+            } else {
+                vec![]
+            }
+        }
+    }
+}
+
 /// Result of mapping a rig's joints onto canonical names.
 #[derive(Clone, Debug, Default)]
 pub struct Mapping {

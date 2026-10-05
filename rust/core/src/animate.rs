@@ -11,6 +11,12 @@
 //! limit) and stays exact when the source has extra in-between bones.
 //! Root travel is scaled by the hip-height ratio. Unshared target bones
 //! keep their rest pose relative to their parent.
+//!
+//! Rest alignment: before the motion is applied, each target bone is
+//! turned (shortest arc) so its rest direction matches the source's, so
+//! "same pose" means "same bone directions", not "same change from each
+//! rig's own rest". Without it a clip made on an A-pose rig lifts a
+//! T-pose rig's arms by the difference (45 deg) in every frame.
 
 use crate::glb::{canonical_quat, Affine, Document};
 use crate::humanoid::{self, Mapping};
@@ -124,6 +130,27 @@ pub fn yaw_between(from: Vec3, to: Vec3) -> Quat {
     shortest_arc(a, b)
 }
 
+/// Rotation taking the target's rest direction of `name` onto the
+/// source's (after yaw), measured toward the first child both rigs have.
+/// Identity when no common child exists.
+fn rest_alignment(src: &Mapped, tgt: &Mapped, name: &str, yaw: Quat) -> Quat {
+    let (Some(ts), Some(ss)) = (tgt.map.node_of(name), src.map.node_of(name)) else {
+        return Quat::IDENTITY;
+    };
+    for child in humanoid::main_children(name) {
+        let (Some(tc), Some(sc)) = (tgt.map.node_of(&child), src.map.node_of(&child)) else {
+            continue;
+        };
+        let dt = tgt.rig.head(tc) - tgt.rig.head(ts);
+        let ds = yaw.rotate_vec(src.rig.head(sc) - src.rig.head(ss));
+        if dt.length() < 1e-9 || ds.length() < 1e-9 {
+            return Quat::IDENTITY;
+        }
+        return shortest_arc(dt.normalized(), ds.normalized());
+    }
+    Quat::IDENTITY
+}
+
 /// Local transforms of every target node for one source frame.
 pub struct Transfer<'a> {
     pub src: &'a Mapped,
@@ -132,6 +159,10 @@ pub struct Transfer<'a> {
     pub scale: f64,
     /// `(target node, source node)` per shared canonical bone.
     pub shared: Vec<(usize, usize)>,
+    /// Per shared bone: world rotation taking the target's rest bone
+    /// direction onto the (yawed) source's, so a clip made on an A-pose
+    /// rig plays as an A-pose-relative motion on a T-pose rig too.
+    pub align: Vec<Quat>,
 }
 
 impl<'a> Transfer<'a> {
@@ -147,12 +178,20 @@ impl<'a> Transfer<'a> {
         } else {
             1.0
         };
+        let yaw = yaw_between(src.forward, tgt.forward);
+        let align = shared
+            .iter()
+            .map(|(tnode, _)| {
+                rest_alignment(src, tgt, tgt.map.canonical_of(*tnode).unwrap_or(""), yaw)
+            })
+            .collect();
         Transfer {
             src,
             tgt,
-            yaw: yaw_between(src.forward, tgt.forward),
+            yaw,
             scale,
             shared,
+            align,
         }
     }
 
@@ -171,11 +210,12 @@ impl<'a> Transfer<'a> {
             let parent_world = trig.parent[i].map(|p| world[p]).unwrap_or(Affine::IDENTITY);
             let mut local = trig.rest[i];
             let mut driven_delta = None;
-            if let Some(&(_, s)) = self.shared.iter().find(|(t, _)| *t == i) {
+            if let Some(k) = self.shared.iter().position(|(t, _)| *t == i) {
+                let s = self.shared[k].1;
                 let rs = srig.rest_world[s].rotation();
                 let ps = sworld[s].rotation();
                 let d = ps.mul(rs.conj());
-                let d = self.yaw.mul(d).mul(self.yaw.conj());
+                let d = self.yaw.mul(d).mul(self.yaw.conj()).mul(self.align[k]);
                 let want = d.mul(trig.rest_world[i].rotation());
                 let pr = parent_world.rotation();
                 local.r = canonical_quat(pr.conj().mul(want));

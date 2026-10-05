@@ -155,40 +155,7 @@ fn expand(bone: &str, map: &Mapping) -> Vec<(String, bool)> {
 
 /// Rest direction of a bone: toward its main child, else its parent's.
 fn bone_dir(rig: &Rig, map: &Mapping, name: &str, up: Vec3, fwd: Vec3) -> Vec3 {
-    let side = if name.ends_with(".L") { "L" } else { "R" };
-    let child: Vec<String> = match name
-        .trim_start_matches("DEF-")
-        .trim_end_matches(".L")
-        .trim_end_matches(".R")
-    {
-        "shoulder" => vec![format!("DEF-upper_arm.{}", side)],
-        "upper_arm" => vec![format!("DEF-forearm.{}", side)],
-        "forearm" => vec![format!("DEF-hand.{}", side)],
-        "hand" => vec![
-            format!("DEF-f_middle.01.{}", side),
-            format!("DEF-f_index.01.{}", side),
-        ],
-        "thigh" => vec![format!("DEF-shin.{}", side)],
-        "shin" => vec![format!("DEF-foot.{}", side)],
-        "foot" => vec![format!("DEF-toe.{}", side)],
-        "DEF-spine.006" | "spine.006" => vec![],
-        other => {
-            if let Some(rest) = other.strip_prefix("spine.") {
-                let k: usize = rest.parse().unwrap_or(0);
-                (k + 1..=6).map(|j| format!("DEF-spine.{:03}", j)).collect()
-            } else if other.starts_with("thumb") || other.starts_with("f_") {
-                let seg: usize = other
-                    .rsplit('.')
-                    .next()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(3);
-                let base = other.rsplit_once('.').map(|(b, _)| b).unwrap_or(other);
-                vec![format!("DEF-{}.{:02}.{}", base, seg + 1, side)]
-            } else {
-                vec![]
-            }
-        }
-    };
+    let child = humanoid::main_children(name);
     let node = map.node_of(name).unwrap();
     for c in child {
         if let Some(cn) = map.node_of(&c) {
