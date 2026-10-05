@@ -1,7 +1,9 @@
 # motionforge
 
-Game-animation sidekick for HLL (Godot 4.7 action-adventure): retarget
-assist, motion stylizer, physics pass, and ML AutoPose. One person,
+Game-animation sidekick for HLL (Bevy/Rust action-adventure): retarget
+assist, motion stylizer, physics pass, ML AutoPose, and the GLB rig
+adapters genforge's character chain runs (standardize, animate,
+pose-test; `docs/adapters.md`). One person,
 one panel, no mocap cleanup marathons. Plan and gates: `PLAN.md`;
 measured numbers: `docs/measurements.md`.
 
@@ -42,7 +44,15 @@ motionforge physics-check --input IN.json --root DEF-spine --feet DEF-foot.L,DEF
 motionforge physics-fix --input IN.json --output OUT.json --root DEF-spine --feet DEF-foot.L,DEF-foot.R
 motionforge autopose --model weights.json --effectors eff.json --output POSE.json
 motionforge clip-info --input IN.json
+motionforge standardize --input rig.glb --output std.glb [--class humanoid]
+motionforge animate --input std.glb --clips clips/ --output animated.glb
+motionforge pose-test --input std.glb --output poses.glb --sheet sheet.png [--clips clips/]
+motionforge fixture-glb --output test.glb --naming mixamo|plain|def [--twisted] [--walk]
+motionforge adapter standardize|animate|pose-test IN.glb OUT.glb RESULT.json [flags]
 ```
+
+The GLB commands and the genforge `adapter` contract are in
+`docs/adapters.md` (HLL humanoid skeleton, mapping rules, limits).
 
 Reports go to stdout (deterministic, golden-pinned); files only to
 `--output`; `--time` prints wall ms to stderr. Formats:

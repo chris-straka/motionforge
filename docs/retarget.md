@@ -2,7 +2,7 @@
 
 One click from a Mixamo FBX, Cascadeur export, or video-to-motion clip
 onto the rigforge rig, saved as a Blender action and exported for
-Godot. The Blender operator handles FBX/action/GLB I/O; the Rust core
+game (HLL runs on Bevy). The Blender operator handles FBX/action/GLB I/O; the Rust core
 does the frame math; the report validates bone mapping, foot contacts,
 and root motion.
 
@@ -17,7 +17,8 @@ and root motion.
    `mixamorig_` prefixes to the bonemap short form) and the target
    skeleton, runs `motionforge retarget`, and imports the result as
    `<action>_retargeted`.
-4. Export the game GLB via rigforge (`motionforge.export_godot`
+4. Export the game GLB via rigforge (`motionforge.export_godot`, a
+   legacy operator id; the button says Export Game GLB,
    forwards to `wm.rigforge_game_export` when rigforge is enabled).
 
 ## Math

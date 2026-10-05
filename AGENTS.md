@@ -88,6 +88,7 @@ behind it (`docs/measurements.md`).
   math onto clip JSON. Never commit game rigs here.
 - `~/SWE/retopoforge` — mesh stage; the structural template
   (workspace layout, subprocess-over-files split, golden tests).
-- `~/SWE/games/hll` — the game (Godot 4.7). Retargeted clips land there
+- `~/SWE/games/hll` — the game (Bevy, Rust; the Godot project was
+  removed 2026-10-05). Retargeted clips land there
   via rigforge's deform-only GLB export; `tools/validate_assets.py`
   is the downstream gate.

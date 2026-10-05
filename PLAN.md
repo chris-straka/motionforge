@@ -1,7 +1,7 @@
 # motionforge — build plan
 
 Written 2026-10-01 for the coding agents who will build it. Goal: make
-game animation for HLL (a stylized action-adventure, Godot) fast for one
+game animation for HLL (a stylized action-adventure, Bevy/Rust) fast for one
 person. Context: `~/SWE/games/tools/roadmap.md`, `~/SWE/games/tools/asset-pipeline.md`
 ("Animation" section). The rig is rigforge's (`~/SWE/rigforge`,
 Rigify-based, presets `hll_hero` and `hll_stalker`).
@@ -10,7 +10,7 @@ Rigify-based, presets `hll_hero` and `hll_stalker`).
 
 1. **Retarget assist**: one click from a Mixamo FBX, Cascadeur export,
    or video-to-motion clip onto the rigforge rig, saved as a Blender
-   action and exported for Godot. Checks bone mapping, foot contacts
+   action and exported as a game GLB. Checks bone mapping, foot contacts
    (no sliding), and root motion.
 2. **Motion stylizer**: realistic clip in, snappy game motion out. Find
    extreme poses, drop in-betweens (key reduction), push extremes away
@@ -61,10 +61,23 @@ Rigify-based, presets `hll_hero` and `hll_stalker`).
 | Phase | Builds | Gate |
 |---|---|---|
 | P0 | Repo scaffold (Rust workspace, Blender extension, AGENTS.md: no game assets committed, determinism, licensing rules) | builds, CLI `--help` |
-| P1 | Retarget assist | a Mixamo clip plays on the `hll_hero` rig in Godot with no foot sliding |
+| P1 | Retarget assist | a Mixamo clip plays on the `hll_hero` rig in the Bevy game with no foot sliding |
 | P2 | Motion stylizer | owner prefers the stylized version of 3 test clips |
 | P3 | Data pipeline for AutoPose (licensed sources only, retargeted) | dataset manifest with source + license per clip |
 | P4 | AutoPose training + Rust inference + Blender tool | gates above; owner keyframes one attack faster than without it |
+
+## genforge adapters (built 2026-10-05)
+
+genforge's `gen character` chain needs three local stages from this
+repo: `standardize` (rename/reparent a Tripo or other rig onto the HLL
+humanoid skeleton so every character shares clips), `animate`
+(retarget clip GLBs onto the character) and `pose-test` (range-of-motion
+sheet for the owner's approval). Built as GLB commands in the Rust core
+plus `motionforge adapter <stage> IN OUT RESULT.json`, the same
+contract as weightforge's adapter. Spec, mapping rules, limits and
+numbers: `docs/adapters.md`. Gate: fixture tests in every naming style,
+a real game rig through all three, and a genforge rehearsal run end to
+end (genforge `docs/phase-7.md`).
 
 ## Rules
 

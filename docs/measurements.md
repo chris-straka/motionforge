@@ -5,6 +5,12 @@ Every numeric claim in these docs, with the command behind it. All run
 build unless noted. Fixture paths are `tests/fixtures/`; goldens pin
 the CLI outputs byte-for-byte.
 
+## GLB rig adapters (2026-10-05)
+
+See `docs/adapters.md` (measurements section): 10 rig-adapter + 3
+adapter-contract tests on top of the suite below, and a real game rig
+through standardize/animate/pose-test.
+
 ## Rust suite
 
 - 64 unit + 10 contract tests green, zero warnings, fmt clean:
@@ -127,8 +133,8 @@ the CLI outputs byte-for-byte.
 
 ## Pending owner gates (not runnable here)
 
-- P1: a Mixamo clip plays on the hll_hero rig in Godot with no foot
-  sliding (needs owner Mixamo account + Godot import).
+- P1: a Mixamo clip plays on the hll_hero rig in the Bevy game with no
+  foot sliding (needs owner Mixamo account + a Bevy scene check).
 - P2: owner prefers the stylized version of 3 test clips.
 - P4: owner keyframes one attack faster with AutoPose; 10 ms holds on
   the full hero rig (measured 1.7 ms on 14 bones; full rig is wider).

@@ -25,9 +25,13 @@ numbers and commands in `docs/measurements.md`.
       heading item below, to retrain only once).
 - [ ] Look at a stylized walk in Blender after #4 (P2 gate: owner
       prefers stylized on 3 test clips).
-- [ ] P1 gate: a Mixamo clip on `hll_hero` in Godot with no foot slide.
+- [ ] P1 gate: a Mixamo clip on `hll_hero` in the Bevy game with no foot slide.
 
 ## Next code tasks (agent-ready)
+
+- [ ] GLB adapters v2 (`docs/adapters.md` limits): foot pinning in
+      `animate` when proportions differ; quadruped ROM poses and clips;
+      CUBICSPLINE keys sampled as splines.
 
 - [ ] **AutoPose heading invariance** (recommended next). Inputs are
       root-relative but not facing-relative: the same pose facing
