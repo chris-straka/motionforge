@@ -6,6 +6,7 @@
 pub mod animate;
 pub mod autopose;
 pub mod clip;
+pub mod contact;
 pub mod detmath;
 pub mod fixture;
 pub mod glb;
