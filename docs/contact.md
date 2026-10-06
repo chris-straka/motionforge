@@ -39,7 +39,7 @@ gets it and the game needs no code.
 4. **Exact check**: forearm and hand vertices (and blade samples) are
    tested against the body mesh with the generalized winding number
    (Jacobson et al. 2013; robust to the open cuts at neck, shoulders and
-   hips). An arm that still cuts the mesh is re-solved from the original
+   hips; far clusters approximated as in Barill et al. 2018). An arm that still cuts the mesh is re-solved from the original
    with fatter proxies (x1.15 ... x3) and the best result is kept.
 5. Pairs that already touch in the rest pose keep that depth as slack.
 
@@ -88,8 +88,10 @@ Andras after the weights gate (genforge rehearsal, SkinTokens rig,
 22 clip-arms cut the mesh before (1 to 76 frames, up to 12.3 cm deep);
 21 are clear after; attack_2 keeps one blade frame at 2.0 cm (wrist at
 its cap). On the 11 extra clips, attack_dash keeps one frame at 2.4 cm.
-The pass with its exact mesh check takes about 15 s for the 13 clips on
-the M4 (most of it the winding-number check).
+The pass with its exact mesh check takes 3.6 s for the 13 clips on the
+M4 (clustered winding numbers: far triangle clusters count by their
+area vector, Barill et al. 2018; 15.4 s with every triangle exact, same
+results).
 
 | clip | arm | frames inside | deepest | after | wrist moved |
 |---|---|---|---|---|---|

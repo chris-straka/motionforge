@@ -158,6 +158,7 @@ pub struct Body {
     arm_verts: Vec<Vec<usize>>,
     /// Rest-pose mesh depth per arm (slack for the exact check).
     mesh_slack: Vec<f64>,
+    clusters: Clusters,
 }
 
 /// Skinned rest vertex: world position and (joint node, weight).
@@ -616,6 +617,7 @@ impl Body {
             .copied()
             .filter(|t| t.iter().all(|&v| is_body(v)))
             .collect();
+        let body_tris_c = body_tris.clone();
         let arm_verts: Vec<Vec<usize>> = arms
             .iter()
             .map(|a| {
@@ -638,6 +640,11 @@ impl Body {
             body_tris,
             arm_verts,
             mesh_slack: Vec::new(),
+            clusters: Clusters::new(
+                &verts.iter().map(|v| v.p).collect::<Vec<_>>(),
+                &body_tris_c,
+                height / 10.0,
+            ),
         };
         // Rest-pose slack.
         let world = rig.world(&vec![None; rig.names.len()]);
@@ -768,11 +775,28 @@ impl Body {
         }
         let mut worst: f64 = 0.0;
         let mut count = 0;
+        // Cheap reject first: a point far outside every body proxy (radius
+        // x1.6 plus 4% of height, generous for bellies and chests) is not
+        // inside the body; the winding number decides the rest.
+        let caps: Vec<(Vec3, Vec3, f64)> = self
+            .static_parts
+            .iter()
+            .map(|c| {
+                let (a, b) = c.posed(&self.inv_rest, world);
+                (a, b, c.r * 1.6 + 0.04 * self.height)
+            })
+            .collect();
+        let mut cdata = None;
         for p in pts {
             if p.x < lo.x || p.y < lo.y || p.z < lo.z || p.x > hi.x || p.y > hi.y || p.z > hi.z {
                 continue;
             }
-            if winding(&posed, &self.body_tris, p).abs() < 0.5 {
+            if !caps.iter().any(|(a, b, r)| seg_seg(*a, *b, p, p).2 < *r) {
+                continue;
+            }
+            let cd =
+                cdata.get_or_insert_with(|| cluster_data(&posed, &self.body_tris, &self.clusters));
+            if fast_winding(&posed, &self.body_tris, cd, p).abs() < 0.5 {
                 continue;
             }
             count += 1;
@@ -934,6 +958,104 @@ fn atan2(y: f64, x: f64) -> f64 {
     } else {
         a
     }
+}
+
+/// Triangles grouped into spatial clusters for [`fast_winding`].
+#[derive(Clone, Debug)]
+pub struct Clusters {
+    /// Triangle indices per cluster.
+    pub tris: Vec<Vec<usize>>,
+}
+
+impl Clusters {
+    /// Group triangles by a grid over their rest centroids (`cell` wide).
+    pub fn new(pos: &[Vec3], tris: &[[usize; 3]], cell: f64) -> Clusters {
+        let mut keys: Vec<((i64, i64, i64), usize)> = tris
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let c = (pos[t[0]] + pos[t[1]] + pos[t[2]]).scale(1.0 / 3.0);
+                let k = |x: f64| (x / cell).floor() as i64;
+                ((k(c.x), k(c.y), k(c.z)), i)
+            })
+            .collect();
+        keys.sort();
+        let mut out: Vec<Vec<usize>> = Vec::new();
+        let mut last = None;
+        for (k, i) in keys {
+            if last != Some(k) {
+                out.push(Vec::new());
+                last = Some(k);
+            }
+            out.last_mut().unwrap().push(i);
+        }
+        Clusters { tris: out }
+    }
+}
+
+/// Generalized winding number with far clusters approximated by their
+/// area-weighted normal (the first-order term of Barill et al. 2018,
+/// "Fast winding numbers for soups and clouds"): a cluster farther than
+/// 2.5 of its radii contributes `N . (c - p) / |c - p|^3`.
+fn fast_winding(
+    pos: &[Vec3],
+    tris: &[[usize; 3]],
+    clusters: &[(Vec3, Vec3, f64, &[usize])],
+    p: Vec3,
+) -> f64 {
+    let mut sum = 0.0;
+    for (c, n, r, members) in clusters {
+        let d = *c - p;
+        let l = d.length();
+        if l > 2.5 * r && l > 1e-9 {
+            sum += n.dot(d) / (l * l * l);
+            continue;
+        }
+        for &ti in *members {
+            let t = tris[ti];
+            let (a, b, cc) = (pos[t[0]] - p, pos[t[1]] - p, pos[t[2]] - p);
+            let (la, lb, lc) = (a.length(), b.length(), cc.length());
+            let num = a.dot(b.cross(cc));
+            let den = la * lb * lc + a.dot(b) * lc + a.dot(cc) * lb + b.dot(cc) * la;
+            sum += 2.0 * atan2(num, den);
+        }
+    }
+    sum / (4.0 * std::f64::consts::PI)
+}
+
+/// Per-pose cluster summaries: (centroid, area vector, radius, members).
+fn cluster_data<'a>(
+    pos: &[Vec3],
+    tris: &[[usize; 3]],
+    cl: &'a Clusters,
+) -> Vec<(Vec3, Vec3, f64, &'a [usize])> {
+    cl.tris
+        .iter()
+        .map(|members| {
+            let mut area = 0.0;
+            let mut c = Vec3::ZERO;
+            let mut n = Vec3::ZERO;
+            for &ti in members {
+                let t = tris[ti];
+                let cr = (pos[t[1]] - pos[t[0]]).cross(pos[t[2]] - pos[t[0]]);
+                let a = cr.length() * 0.5;
+                area += a;
+                c = c + (pos[t[0]] + pos[t[1]] + pos[t[2]]).scale(a / 3.0);
+                n = n + cr.scale(0.5);
+            }
+            let c = if area > 0.0 {
+                c.scale(1.0 / area)
+            } else {
+                pos[tris[members[0]][0]]
+            };
+            let r = members
+                .iter()
+                .flat_map(|&ti| tris[ti].iter())
+                .map(|&v| (pos[v] - c).length())
+                .fold(0.0, f64::max);
+            (c, n, r, members.as_slice())
+        })
+        .collect()
 }
 
 /// Generalized winding number of `p` (Jacobson et al. 2013): the summed
@@ -1920,6 +2042,17 @@ mod tests {
         for q in quads {
             tris.push([q[0], q[1], q[2]]);
             tris.push([q[0], q[2], q[3]]);
+        }
+        // Clustered (fast) winding agrees inside, outside and far away.
+        let cl = Clusters::new(&pos, &tris, 0.7);
+        let cd = cluster_data(&pos, &tris, &cl);
+        for p in [
+            Vec3::new(0.2, -0.3, 0.1),
+            Vec3::new(2.5, 0.0, 0.0),
+            Vec3::new(9.0, 4.0, -3.0),
+        ] {
+            let (e, f) = (winding(&pos, &tris, p), fast_winding(&pos, &tris, &cd, p));
+            assert!((e - f).abs() < 0.05, "{p:?}: {e} vs {f}");
         }
         let inside = winding(&pos, &tris, Vec3::new(0.2, -0.3, 0.1));
         let outside = winding(&pos, &tris, Vec3::new(2.5, 0.0, 0.0));

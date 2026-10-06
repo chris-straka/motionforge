@@ -31,9 +31,7 @@ numbers and commands in `docs/measurements.md`.
 
 - [ ] Contact pass v2 (`docs/contact.md` limits): upper arm (armpit) and
       leg proxies, other-arm contact, a blade proxy for drawn-weapon
-      locomotion; speed up the exact check (a BVH or a grid over the body
-      triangles instead of all-triangle winding numbers, ~15 s per 13
-      clips now).
+      locomotion.
 - [ ] Corrective shapes if the owner wants the deformation gate to pass
       real clips (`docs/adapters.md` "Shoulder helpers"): pose-space
       targets baked as glTF morph weights per clip, and weightforge
