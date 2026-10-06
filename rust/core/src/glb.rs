@@ -122,6 +122,183 @@ impl Document {
         std::fs::write(path, bytes).map_err(|e| format!("cannot write {}: {}", path, e))
     }
 
+    /// Drop accessors nothing references (old animation samplers after a
+    /// clip swap) and the buffer bytes no kept accessor or image uses, so
+    /// rewritten files do not carry dead data. Files with extensions are
+    /// left alone (an extension may reference accessors we do not know).
+    pub fn compact(&mut self) {
+        if self
+            .json
+            .get("extensionsUsed")
+            .and_then(Json::as_arr)
+            .is_some_and(|a| !a.is_empty())
+        {
+            return;
+        }
+        let n_acc = self.array("accessors").len();
+        let mut used = vec![false; n_acc];
+        let mark = |v: Option<&Json>, used: &mut Vec<bool>| {
+            if let Some(i) = v.and_then(Json::as_usize) {
+                if i < used.len() {
+                    used[i] = true;
+                }
+            }
+        };
+        for mesh in self.array("meshes") {
+            for prim in mesh.get("primitives").and_then(Json::as_arr).unwrap_or(&[]) {
+                for (_, v) in prim.get("attributes").and_then(Json::as_obj).unwrap_or(&[]) {
+                    mark(Some(v), &mut used);
+                }
+                mark(prim.get("indices"), &mut used);
+                for t in prim.get("targets").and_then(Json::as_arr).unwrap_or(&[]) {
+                    for (_, v) in t.as_obj().unwrap_or(&[]) {
+                        mark(Some(v), &mut used);
+                    }
+                }
+            }
+        }
+        for skin in self.array("skins") {
+            mark(skin.get("inverseBindMatrices"), &mut used);
+        }
+        for anim in self.array("animations") {
+            for sm in anim.get("samplers").and_then(Json::as_arr).unwrap_or(&[]) {
+                mark(sm.get("input"), &mut used);
+                mark(sm.get("output"), &mut used);
+            }
+        }
+        let mut acc_map = vec![usize::MAX; n_acc];
+        let mut k = 0;
+        for i in 0..n_acc {
+            if used[i] {
+                acc_map[i] = k;
+                k += 1;
+            }
+        }
+        let remap_acc = |v: &mut Json, key: &str, map: &[usize]| {
+            if let Some(i) = v.get(key).and_then(Json::as_usize) {
+                if let Some(&m) = map.get(i) {
+                    v.set(key, Json::num(m as f64));
+                }
+            }
+        };
+        if let Some(meshes) = self.json.get_mut("meshes").and_then(Json::as_arr_mut) {
+            for mesh in meshes.iter_mut() {
+                if let Some(prims) = mesh.get_mut("primitives").and_then(Json::as_arr_mut) {
+                    for prim in prims.iter_mut() {
+                        if let Some(attrs) = prim.get_mut("attributes") {
+                            let keys: Vec<String> = attrs
+                                .as_obj()
+                                .unwrap_or(&[])
+                                .iter()
+                                .map(|(k, _)| k.clone())
+                                .collect();
+                            for key in keys {
+                                remap_acc(attrs, &key, &acc_map);
+                            }
+                        }
+                        remap_acc(prim, "indices", &acc_map);
+                        if let Some(ts) = prim.get_mut("targets").and_then(Json::as_arr_mut) {
+                            for t in ts.iter_mut() {
+                                let keys: Vec<String> = t
+                                    .as_obj()
+                                    .unwrap_or(&[])
+                                    .iter()
+                                    .map(|(k, _)| k.clone())
+                                    .collect();
+                                for key in keys {
+                                    remap_acc(t, &key, &acc_map);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(skins) = self.json.get_mut("skins").and_then(Json::as_arr_mut) {
+            for skin in skins.iter_mut() {
+                remap_acc(skin, "inverseBindMatrices", &acc_map);
+            }
+        }
+        if let Some(anims) = self.json.get_mut("animations").and_then(Json::as_arr_mut) {
+            for anim in anims.iter_mut() {
+                if let Some(sms) = anim.get_mut("samplers").and_then(Json::as_arr_mut) {
+                    for sm in sms.iter_mut() {
+                        remap_acc(sm, "input", &acc_map);
+                        remap_acc(sm, "output", &acc_map);
+                    }
+                }
+            }
+        }
+        let accessors: Vec<Json> = self
+            .array("accessors")
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| used[*i])
+            .map(|(_, a)| a.clone())
+            .collect();
+        // Buffer views still in use.
+        let n_view = self.array("bufferViews").len();
+        let mut vused = vec![false; n_view];
+        let mut vmark = |v: Option<&Json>| {
+            if let Some(i) = v.and_then(Json::as_usize) {
+                if i < vused.len() {
+                    vused[i] = true;
+                }
+            }
+        };
+        for a in &accessors {
+            vmark(a.get("bufferView"));
+            if let Some(sp) = a.get("sparse") {
+                vmark(sp.get("indices").and_then(|x| x.get("bufferView")));
+                vmark(sp.get("values").and_then(|x| x.get("bufferView")));
+            }
+        }
+        for img in self.array("images") {
+            vmark(img.get("bufferView"));
+        }
+        let mut view_map = vec![usize::MAX; n_view];
+        let mut views = Vec::new();
+        let mut bin = Vec::new();
+        for (i, v) in self.array("bufferViews").iter().enumerate() {
+            if !vused[i] {
+                continue;
+            }
+            let off = v.get("byteOffset").and_then(Json::as_usize).unwrap_or(0);
+            let len = v.get("byteLength").and_then(Json::as_usize).unwrap_or(0);
+            let Some(bytes) = self.bin.get(off..off + len) else {
+                return; // malformed: leave the file as it is
+            };
+            while bin.len() % 4 != 0 {
+                bin.push(0);
+            }
+            let mut nv = v.clone();
+            nv.set("byteOffset", Json::num(bin.len() as f64));
+            bin.extend_from_slice(bytes);
+            view_map[i] = views.len();
+            views.push(nv);
+        }
+        let mut accessors = accessors;
+        for a in accessors.iter_mut() {
+            remap_acc(a, "bufferView", &view_map);
+            if let Some(sp) = a.get_mut("sparse") {
+                if let Some(ix) = sp.get_mut("indices") {
+                    remap_acc(ix, "bufferView", &view_map);
+                }
+                if let Some(vs) = sp.get_mut("values") {
+                    remap_acc(vs, "bufferView", &view_map);
+                }
+            }
+        }
+        if let Some(imgs) = self.json.get_mut("images").and_then(Json::as_arr_mut) {
+            for img in imgs.iter_mut() {
+                remap_acc(img, "bufferView", &view_map);
+            }
+        }
+        self.json.set("accessors", Json::Arr(accessors));
+        self.json.set("bufferViews", Json::Arr(views));
+        self.bin = bin;
+    }
+
     pub fn array(&self, key: &str) -> &[Json] {
         self.json.get(key).and_then(Json::as_arr).unwrap_or(&[])
     }
