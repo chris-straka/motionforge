@@ -45,14 +45,22 @@ motionforge physics-fix --input IN.json --output OUT.json --root DEF-spine --fee
 motionforge autopose --model weights.json --effectors eff.json --output POSE.json
 motionforge clip-info --input IN.json
 motionforge standardize --input rig.glb --output std.glb [--class humanoid]
-motionforge animate --input std.glb --clips clips/ --output animated.glb
+motionforge animate --input std.glb --clips clips/ --output animated.glb \\
+    [--pick "lib.glb:Sword_Regular_A=attack_1,..."] [--no-contact] [--weapon R|L|none]
+motionforge grip --input lib-with-weapon-clips.glb --output lib.glb
 motionforge pose-test --input std.glb --output poses.glb --sheet sheet.png [--clips clips/]
 motionforge fixture-glb --output test.glb --naming mixamo|plain|def [--twisted] [--walk]
 motionforge adapter standardize|animate|pose-test IN.glb OUT.glb RESULT.json [flags]
 ```
 
 The GLB commands and the genforge `adapter` contract are in
-`docs/adapters.md` (HLL humanoid skeleton, mapping rules, limits). The
+`docs/adapters.md` (HLL humanoid skeleton, mapping rules, limits).
+`animate` ends with the **contact pass** (`docs/contact.md`): collision
+proxies fitted to the character's mesh, two-bone arm IK that eases the
+hands, forearms and a held weapon out of the body per frame, verified on
+the mesh. `standardize` adds `Socket_Hand_L/R` weapon sockets; `grip`
+finds the grip a weapon clip set was animated for. Contact sheets and
+videos of clips: `blender/tools/clip_sheet.py`. The
 skeleton has twist/helper bones at the upper arms and thighs
 (`DEF-upper_arm_twist.L` ...): standardize adds them, animate and
 pose-test key them with half their driver's rotation, so the game needs

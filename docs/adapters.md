@@ -87,6 +87,10 @@ rerig is the `repair-rig` adapter).
    then they change nothing. `RESULT.json` lists them (`helpers_added`).
    Standardizing twice gives the same file (helpers are found by name).
 
+7. Hand sockets `Socket_Hand_L/R` are added under the hands (plain
+   nodes, not joints; `docs/contact.md`), and the dropped animations'
+   buffer data leaves the file.
+
 Non-humanoids (`--class quadruped|custom`) keep their skeleton and only
 gain the `DEF-` prefix the rig contract (rfcheck) requires.
 
@@ -112,6 +116,10 @@ instead of lifting its arms by the 45 deg rest difference (test:
 `retarget_aligns_rest_poses`, directions within 0.05 deg). Each clip reports a
 self-check (`max_error_deg`, world rotation mismatch; the adapter fails
 above 0.5 deg) and root travel. Clip names are kept (`-2` on clashes).
+
+Then the contact pass runs on every clip (`docs/contact.md`; the
+adapter's `animate.clips[].contact` reports it per arm), and the
+target's hand sockets turn to the clips' grip. `--no-contact` skips it.
 
 v1 limits: humanoids only; no foot pinning (the source's contacts are
 reproduced exactly only when proportions match); CUBICSPLINE source
@@ -164,3 +172,26 @@ six-column PNG.
   68.8 after `weights fix` (2 failing regions left) vs 47.3 -> 62.8 (4)
   without them. Numbers and sheets: weightforge README, "Twist/helper
   bones".
+
+## Shoulder helpers (tried 2026-10-06, not shipped)
+
+Owner decision: shoulder helper bones first, corrective shapes only if
+weightforge still shows shoulder collapse. Two designs were built and
+measured on Andras (genforge rehearsal rig, after the weights gate) with
+weightforge's post-animation fix; neither beat the existing half-turn
+twist helper, so neither ships (patches kept outside the repo):
+
+| helpers on the upper arm | placeholder clips, fix | CC0 library, fix |
+|---|---|---|
+| twist (0.5) only, as shipped | 44.7 -> 51.0 | 29.9 |
+| + glenohumeral helper (0.25 share) | 44.7 -> 44.9 | 30.2 |
+| + glenohumeral helper (0.333), before the contact pass | 45.7 -> 48.3 | |
+| + clavicle-pivot helper (0.2-0.5) | 52.5 -> 52.5 (fix finds nothing) | |
+
+Upper bounds tried on the same clips (weightforge check with other
+skinning in place of LBS): dual-quaternion skinning 25.9-41.0,
+smoothed-weight DQS 27-30, a quick ARAP relaxation 18.6. The CC0 source
+mannequin fails the same gate on its own clips (35.5). The shoulder and
+thigh findings are what a deep lunge, a tuck roll and an overhead swing
+do to a skinned mesh, so the next lever is the gate's policy for clip
+poses or corrective shapes (README of weightforge, genforge D63).

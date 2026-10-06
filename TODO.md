@@ -29,6 +29,16 @@ numbers and commands in `docs/measurements.md`.
 
 ## Next code tasks (agent-ready)
 
+- [ ] Contact pass v2 (`docs/contact.md` limits): upper arm (armpit) and
+      leg proxies, other-arm contact, a blade proxy for drawn-weapon
+      locomotion; speed up the exact check (a BVH or a grid over the body
+      triangles instead of all-triangle winding numbers, ~15 s per 13
+      clips now).
+- [ ] Corrective shapes if the owner wants the deformation gate to pass
+      real clips (`docs/adapters.md` "Shoulder helpers"): pose-space
+      targets baked as glTF morph weights per clip, and weightforge
+      evaluating morph targets.
+
 - [ ] GLB adapters v2 (`docs/adapters.md` limits): foot pinning in
       `animate` when proportions differ; quadruped ROM poses and clips;
       CUBICSPLINE keys sampled as splines.
