@@ -37,11 +37,13 @@ pub struct ClipReport {
     /// motion over the clip (a self-check; ~0 unless scales shear).
     pub max_error_deg: f64,
     pub root_travel_m: f64,
+    /// What the contact pass found and changed (when it ran).
+    pub contact: Option<crate::contact::ClipContact>,
 }
 
 impl ClipReport {
     pub fn to_json(&self) -> Json {
-        Json::obj(vec![
+        let mut fields = vec![
             ("name", Json::str(&self.name)),
             ("source", Json::str(&self.source)),
             ("frames", Json::num(self.frames as f64)),
@@ -49,7 +51,11 @@ impl ClipReport {
             ("bones_driven", Json::num(self.bones_driven as f64)),
             ("max_error_deg", Json::num(round(self.max_error_deg, 4))),
             ("root_travel_m", Json::num(round(self.root_travel_m, 4))),
-        ])
+        ];
+        if let Some(c) = &self.contact {
+            fields.push(("contact", c.to_json()));
+        }
+        Json::obj(fields)
     }
 }
 
@@ -254,6 +260,31 @@ impl<'a> Transfer<'a> {
     }
 }
 
+/// Which clips to take and how to name them: `(source clip name, new
+/// name)`, optionally `label:clip` to pick from one source file. Output
+/// order follows the pick list.
+pub type Pick = Vec<(String, String)>;
+
+/// Parse `"Idle_Loop=idle,ual2.glb:Sword_Regular_A=attack_1"`; a bare name
+/// keeps its name.
+pub fn parse_pick(spec: &str) -> Result<Pick, String> {
+    let mut out = Vec::new();
+    for item in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let (from, to) = match item.split_once('=') {
+            Some((a, b)) => (a.trim(), b.trim()),
+            None => (item, item.rsplit(':').next().unwrap_or(item)),
+        };
+        if from.is_empty() || to.is_empty() {
+            return Err(format!("bad --pick entry '{}'", item));
+        }
+        out.push((from.to_string(), to.to_string()));
+    }
+    if out.is_empty() {
+        return Err("--pick is empty".into());
+    }
+    Ok(out)
+}
+
 /// Retarget every animation of every source onto `target`, replacing the
 /// target's own animations. `sources` are `(label, document)`.
 pub fn retarget_clips(
@@ -261,27 +292,103 @@ pub fn retarget_clips(
     sources: &[(String, Document)],
     fps: f64,
 ) -> Result<(Document, Vec<ClipReport>), String> {
+    retarget_picked(target, sources, fps, None, None)
+}
+
+/// [`retarget_clips`] limited to (and renamed by) `pick`.
+pub fn retarget_picked(
+    target: &Document,
+    sources: &[(String, Document)],
+    fps: f64,
+    pick: Option<&Pick>,
+    contact: Option<&crate::contact::Options>,
+) -> Result<(Document, Vec<ClipReport>), String> {
     let tgt = Mapped::new(target)?;
     let mut out = target.clone();
     out.json.remove("animations");
     let mut reports = Vec::new();
     let mut used_names: Vec<String> = Vec::new();
-    for (label, src_doc) in sources {
-        let src = Mapped::new(src_doc).map_err(|e| format!("{}: {}", label, e))?;
-        let transfer = Transfer::new(&src, &tgt);
-        if transfer.shared.len() < 10 {
-            return Err(format!(
-                "{}: only {} bones shared with the target",
-                label,
-                transfer.shared.len()
-            ));
+    let mapped: Vec<Mapped> = sources
+        .iter()
+        .map(|(label, doc)| Mapped::new(doc).map_err(|e| format!("{}: {}", label, e)))
+        .collect::<Result<_, _>>()?;
+    let anims: Vec<Vec<Animation>> = sources
+        .iter()
+        .map(|(_, doc)| Animation::load_all(doc))
+        .collect::<Result<_, _>>()?;
+    // Jobs: (source index, animation index, output base name).
+    let mut jobs: Vec<(usize, usize, String)> = Vec::new();
+    match pick {
+        None => {
+            for (si, list) in anims.iter().enumerate() {
+                for (ai, a) in list.iter().enumerate() {
+                    jobs.push((si, ai, a.name.clone()));
+                }
+            }
         }
-        for anim in Animation::load_all(src_doc)? {
+        Some(pick) => {
+            for (from, to) in pick {
+                let (want_label, want) = match from.rsplit_once(':') {
+                    Some((l, n)) => (Some(l), n),
+                    None => (None, from.as_str()),
+                };
+                let found = sources.iter().enumerate().find_map(|(si, (label, _))| {
+                    if want_label.is_some_and(|l| l != label) {
+                        return None;
+                    }
+                    anims[si]
+                        .iter()
+                        .position(|a| a.name == want)
+                        .map(|ai| (si, ai))
+                });
+                let (si, ai) = found.ok_or_else(|| format!("--pick: no clip named '{}'", from))?;
+                jobs.push((si, ai, to.clone()));
+            }
+        }
+    }
+    let mut transfers: Vec<Option<Transfer>> = (0..sources.len()).map(|_| None).collect();
+    for &(si, _, _) in &jobs {
+        if transfers[si].is_none() {
+            let t = Transfer::new(&mapped[si], &tgt);
+            if t.shared.len() < 10 {
+                return Err(format!(
+                    "{}: only {} bones shared with the target",
+                    sources[si].0,
+                    t.shared.len()
+                ));
+            }
+            transfers[si] = Some(t);
+        }
+    }
+    // Weapon sockets follow the clips' grip: the first source with a
+    // `Socket_Hand_*` sets the target's socket rotation (`sync_sockets`).
+    let mut sockets_synced = Vec::new();
+    for &(si, _, _) in &jobs {
+        let done = sync_sockets(&mut out, &tgt, &mapped[si], transfers[si].as_ref().unwrap());
+        if !done.is_empty() {
+            sockets_synced = done;
+            break;
+        }
+    }
+    let _ = &sockets_synced;
+    let body = match contact {
+        Some(o) => {
+            let rig = Rig::from_doc(&out)?;
+            crate::contact::Body::build(&out, &rig, o)?
+        }
+        None => None,
+    };
+    for (si, ai, base) in &jobs {
+        let label = &sources[*si].0;
+        let src = &mapped[*si];
+        let transfer = transfers[*si].as_ref().unwrap();
+        let anim = &anims[*si][*ai];
+        {
             let frames = ((anim.duration * fps).round() as usize).max(1) + 1;
-            let mut name = anim.name.clone();
+            let mut name = base.clone();
             let mut k = 2;
             while used_names.contains(&name) {
-                name = format!("{}-{}", anim.name, k);
+                name = format!("{}-{}", base, k);
                 k += 1;
             }
             used_names.push(name.clone());
@@ -293,6 +400,7 @@ pub fn retarget_clips(
             nodes.extend(helpers.iter().map(|(h, _)| *h));
             let mut tracks: Vec<Vec<Trs>> = vec![Vec::with_capacity(frames); nodes.len()];
             let mut max_err: f64 = 0.0;
+            let mut posed: Vec<Vec<Option<Trs>>> = Vec::with_capacity(frames);
             for f in 0..frames {
                 let t = if frames > 1 {
                     anim.duration * f as f64 / (frames - 1) as f64
@@ -300,8 +408,18 @@ pub fn retarget_clips(
                     0.0
                 };
                 times.push(t);
-                let (mut locals, err) = transfer.frame(&anim.sample(&src.rig, t));
+                let (locals, err) = transfer.frame(&anim.sample(&src.rig, t));
                 max_err = max_err.max(err);
+                posed.push(locals);
+            }
+            // Contact pass on the character's own body (`contact.rs`).
+            let contact_report = match (&body, contact) {
+                (Some(b), Some(o)) => Some(crate::contact::fix_clip(
+                    b, &tgt.rig, &mut posed, &times, &name, o,
+                )),
+                _ => None,
+            };
+            for mut locals in posed {
                 crate::helpers::drive(&tgt.rig, &mut locals);
                 for (k, node) in nodes.iter().enumerate() {
                     tracks[k].push(locals[*node].unwrap_or(tgt.rig.rest[*node]));
@@ -321,10 +439,53 @@ pub fn retarget_clips(
                 bones_driven: transfer.shared.len(),
                 max_error_deg: max_err.to_degrees(),
                 root_travel_m: root_travel,
+                contact: contact_report,
             });
         }
     }
+    // The target's replaced animations leave the file.
+    out.compact();
     Ok((out, reports))
+}
+
+/// Turn the target's hand sockets so a weapon sits in the hand the way it
+/// sat in the source's (the same rest transfer the hand gets:
+/// `S_t = align^-1 * yaw * S_s`). Sockets keep their own position.
+/// Returns the sockets changed.
+pub fn sync_sockets(
+    out: &mut Document,
+    tgt: &Mapped,
+    src: &Mapped,
+    transfer: &Transfer,
+) -> Vec<String> {
+    let mut done = Vec::new();
+    for side in ["L", "R"] {
+        let name = format!("Socket_Hand_{side}");
+        let hand = format!("DEF-hand.{side}");
+        let (Some(th), Some(sh)) = (tgt.map.node_of(&hand), src.map.node_of(&hand)) else {
+            continue;
+        };
+        let find = |rig: &Rig, h: usize| {
+            rig.children[h]
+                .iter()
+                .copied()
+                .find(|&c| rig.names[c] == name)
+        };
+        let (Some(ts), Some(ss)) = (find(&tgt.rig, th), find(&src.rig, sh)) else {
+            continue;
+        };
+        let Some(k) = transfer.shared.iter().position(|(t, _)| *t == th) else {
+            continue;
+        };
+        let sw = src.rig.rest_world[ss].rotation();
+        let want = transfer.align[k].conj().mul(transfer.yaw).mul(sw);
+        let local_r = canonical_quat(tgt.rig.rest_world[th].rotation().conj().mul(want));
+        let node = &mut out.array_mut("nodes")[ts];
+        let (t, _, sc) = crate::glb::node_trs(node);
+        crate::glb::set_node_trs(node, t, local_r, sc);
+        done.push(name);
+    }
+    done
 }
 
 /// Append one animation: rotation tracks for `nodes`, plus translation

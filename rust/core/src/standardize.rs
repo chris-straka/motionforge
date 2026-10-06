@@ -32,6 +32,8 @@ pub struct Report {
     pub vertices: usize,
     /// Twist/helper bones added (`helpers.rs`).
     pub helpers: Vec<String>,
+    /// Hand sockets added (`contact::insert_sockets`).
+    pub sockets: Vec<String>,
 }
 
 impl Report {
@@ -62,6 +64,10 @@ impl Report {
             (
                 "helpers_added",
                 Json::Arr(self.helpers.iter().map(|m| Json::str(m)).collect()),
+            ),
+            (
+                "sockets_added",
+                Json::Arr(self.sockets.iter().map(|m| Json::str(m)).collect()),
             ),
         ])
     }
@@ -424,6 +430,10 @@ fn humanoid_standardize(doc: &Document, rig: &Rig) -> Result<Outcome, String> {
     let inserted = crate::helpers::insert(&mut out)?;
     report.joints_out = new_joints.len() + inserted.bones.len();
     report.helpers = inserted.bones;
+    // Weapon sockets on the hands (attachment nodes, not joints).
+    report.sockets = crate::contact::insert_sockets(&mut out)?;
+    // The dropped animations' data leaves the file.
+    out.compact();
     Ok(Outcome::Done(out, report))
 }
 

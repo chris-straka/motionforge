@@ -8,7 +8,8 @@
 // Exit 0 = ok, 1 = ran but the stage failed (result written, ok false),
 // 2 = error (no result written, so the chain stops instead of guessing).
 
-use motion_core::animate::{retarget_clips, round};
+use motion_core::animate::{parse_pick, retarget_clips, retarget_picked, round};
+use motion_core::contact::Options as ContactOptions;
 use motion_core::fixture::{self, Naming};
 use motion_core::glb::Document;
 use motion_core::json::{emit_pretty, Json};
@@ -118,6 +119,65 @@ pub fn cmd_standardize(cmd: &Cmd) -> CmdResult {
     }
 }
 
+/// Contact-pass settings from flags (on unless `--no-contact`).
+fn contact_opts(cmd: &Cmd) -> Result<Option<ContactOptions>, (i32, String)> {
+    if cmd.flag("no-contact") {
+        return Ok(None);
+    }
+    let mut o = ContactOptions::default();
+    if let Some(w) = cmd.get("weapon") {
+        o.weapon_side = match w {
+            "R" | "r" => Some("R".into()),
+            "L" | "l" => Some("L".into()),
+            "none" => None,
+            other => return Err((1, format!("--weapon must be R|L|none, got '{}'", other))),
+        };
+    }
+    o.weapon_length = crate::parse_f64(cmd, "weapon-length", o.weapon_length)?;
+    if let Some(c) = cmd.get("weapon-clips") {
+        o.weapon_clips = c
+            .split(',')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    o.ramp = crate::parse_f64(cmd, "contact-ramp", o.ramp)?;
+    if !(0.0..=2.0).contains(&o.ramp) || !(0.0..=2.0).contains(&o.weapon_length) {
+        return Err((
+            1,
+            "--contact-ramp and --weapon-length must be in 0..2".into(),
+        ));
+    }
+    Ok(Some(o))
+}
+
+fn contact_line(c: &motion_core::contact::ClipContact) -> String {
+    let mut parts = Vec::new();
+    for a in &c.arms {
+        if a.frames_before == 0 && a.mesh_frames_before == 0 {
+            continue;
+        }
+        parts.push(format!(
+            "{}: proxies {} frames ({:.1} cm) -> {}; mesh {} frames inside ({:.1} cm) -> {} ({:.1} cm); wrist moved up to {:.1} cm in {} frames",
+            a.side,
+            a.frames_before,
+            a.max_depth_before * 100.0,
+            a.frames_after,
+            a.mesh_frames_before,
+            a.mesh_depth_before * 100.0,
+            a.mesh_frames_after,
+            a.mesh_depth_after * 100.0,
+            a.max_shift * 100.0,
+            a.frames_changed
+        ));
+    }
+    if parts.is_empty() {
+        "  contact: clean\n".into()
+    } else {
+        format!("  contact {}\n", parts.join("; "))
+    }
+}
+
 pub fn cmd_animate(cmd: &Cmd) -> CmdResult {
     let input = cmd.required("input")?;
     let output = cmd.required("output")?;
@@ -130,7 +190,21 @@ pub fn cmd_animate(cmd: &Cmd) -> CmdResult {
         return Err((1, "missing required --clips".into()));
     }
     let doc = load(input)?;
-    let (out, reports) = retarget_clips(&doc, &sources, fps).map_err(|e| (3, e))?;
+    let pick = match cmd.get("pick") {
+        Some(spec) => Some(parse_pick(spec).map_err(|e| (1, e))?),
+        None => None,
+    };
+    let contact = contact_opts(cmd)?;
+    let (out, reports) = retarget_picked(&doc, &sources, fps, pick.as_ref(), contact.as_ref())
+        .map_err(|e| (3, e))?;
+    if let Some(path) = cmd.get("proxies") {
+        let rig = motion_core::rig::Rig::from_doc(&doc).map_err(|e| (3, e))?;
+        let body =
+            motion_core::contact::Body::build(&doc, &rig, &contact.clone().unwrap_or_default())
+                .map_err(|e| (3, e))?
+                .ok_or((3, "no collision proxies for this rig".to_string()))?;
+        std::fs::write(path, pretty(&body.to_json(&rig))?).map_err(|e| (3, e.to_string()))?;
+    }
     save(&out, output)?;
     let mut r = String::from("=== motionforge animate ===\n");
     for c in &reports {
@@ -143,9 +217,133 @@ pub fn cmd_animate(cmd: &Cmd) -> CmdResult {
             round(c.max_error_deg, 6),
             round(c.root_travel_m, 4)
         ));
+        if let Some(ct) = &c.contact {
+            r.push_str(&contact_line(ct));
+        }
     }
     r.push_str(&format!("output: {}\n", output));
     Ok(r)
+}
+
+/// `motionforge grip`: find the blade direction a GLB's own weapon clips
+/// were animated for (the direction that keeps the blade out of the body)
+/// and write it into its `Socket_Hand_<side>`.
+pub fn cmd_grip(cmd: &Cmd) -> CmdResult {
+    use motion_core::contact::grip_search;
+    use motion_core::rig::{Animation, Rig};
+    let input = cmd.required("input")?;
+    let doc = load(input)?;
+    let side = cmd.get("side").unwrap_or("R");
+    let opts = contact_opts(cmd)?.unwrap_or_default();
+    let rig = Rig::from_doc(&doc).map_err(|e| (3, e))?;
+    let map = motion_core::humanoid::map_rig(&rig);
+    let hand = map
+        .node_of(&format!("DEF-hand.{}", side))
+        .ok_or((3, "no hand".to_string()))?;
+    let socket = rig.children[hand]
+        .iter()
+        .copied()
+        .find(|&c| rig.names[c] == format!("Socket_Hand_{}", side))
+        .ok_or((
+            3,
+            format!("no Socket_Hand_{} (run standardize first)", side),
+        ))?;
+    let origin = rig.rest_world[socket].t;
+    let mut clips = Vec::new();
+    let mut names = Vec::new();
+    for anim in Animation::load_all(&doc).map_err(|e| (3, e))? {
+        if !opts.weapon_in(&anim.name) {
+            continue;
+        }
+        let n = ((anim.duration * 15.0).round() as usize).max(1) + 1;
+        clips.push(
+            (0..n)
+                .map(|f| anim.sample(&rig, anim.duration * f as f64 / (n - 1).max(1) as f64))
+                .collect::<Vec<_>>(),
+        );
+        names.push(anim.name.clone());
+    }
+    if clips.is_empty() {
+        return Err((
+            1,
+            "no weapon clips in the input (see --weapon-clips)".into(),
+        ));
+    }
+    let verts = motion_core::contact::skinned_rest(&doc, &rig).map_err(|e| (3, e))?;
+    let height = verts.iter().map(|v| v.p.y).fold(f64::MIN, f64::max)
+        - verts.iter().map(|v| v.p.y).fold(f64::MAX, f64::min);
+    let ranked = grip_search(
+        &doc,
+        &rig,
+        hand,
+        origin,
+        opts.weapon_length * height,
+        &clips,
+    )
+    .map_err(|e| (3, e))?;
+    let frames: usize = clips.iter().map(|c| c.len()).sum();
+    let mut r = format!(
+        "=== motionforge grip ===\nclips: {}\nframes: {}\n",
+        names.join(", "),
+        frames
+    );
+    let cur = rig.rest_world[socket]
+        .apply_linear(motion_core::math::Vec3::new(0.0, 1.0, 0.0))
+        .normalized();
+    let cur_score = grip_search_one(&ranked, cur);
+    r.push_str(&format!(
+        "current socket blade: ({:.3}, {:.3}, {:.3}) nearest candidate hits {}\n",
+        cur.x, cur.y, cur.z, cur_score
+    ));
+    for (d, f, clear) in ranked.iter().take(6) {
+        r.push_str(&format!(
+            "candidate ({:.3}, {:.3}, {:.3}): blade hits {}, mean clearance {:.3}\n",
+            d.x, d.y, d.z, f, clear
+        ));
+    }
+    let worst = ranked.last().unwrap();
+    r.push_str(&format!(
+        "worst ({:.3}, {:.3}, {:.3}): hits {}\n",
+        worst.0.x, worst.0.y, worst.0.z, worst.1
+    ));
+    if let Some(out) = cmd.get("output") {
+        let best = ranked[0].0;
+        let mut doc = doc.clone();
+        let hw = rig.rest_world[hand];
+        let hdir = (hw.apply_linear(motion_core::math::Vec3::new(0.0, 1.0, 0.0))).normalized();
+        let mut x = best.cross(hdir);
+        if x.length() < 1e-6 {
+            x = motion_core::math::Vec3::new(1.0, 0.0, 0.0);
+        }
+        let x = x.normalized();
+        let m = motion_core::math::Mat3::from_cols(x, best, x.cross(best));
+        let local = motion_core::glb::canonical_quat(
+            hw.rotation()
+                .conj()
+                .mul(motion_core::math::Quat::from_mat3(m)),
+        );
+        let node = &mut doc.array_mut("nodes")[socket];
+        let (t, _, sc) = motion_core::glb::node_trs(node);
+        motion_core::glb::set_node_trs(node, t, local, sc);
+        save(&doc, out)?;
+        r.push_str(&format!("output: {}\n", out));
+    }
+    Ok(r)
+}
+
+fn grip_search_one(
+    ranked: &[(motion_core::math::Vec3, usize, f64)],
+    d: motion_core::math::Vec3,
+) -> usize {
+    ranked
+        .iter()
+        .max_by(|a, b| {
+            a.0.dot(d)
+                .partial_cmp(&b.0.dot(d))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|x| x.1)
+        .unwrap_or(0)
 }
 
 pub fn cmd_pose_test(cmd: &Cmd) -> CmdResult {
@@ -285,12 +483,14 @@ fn render_sheet(
 const ADAPTER_HELP: &str = "usage: motionforge adapter <standardize|animate|pose-test> IN.glb OUT.glb RESULT.json [flags]\n\
 \n\
   standardize  rename/reparent the rig onto the HLL skeleton (DEF-* names)\n\
-  animate      retarget clip GLBs onto the character (--clips required)\n\
+  animate      retarget clip GLBs onto the character (--clips required), then\n\
+               the contact pass (hands, forearms, held weapon out of the body)\n\
   pose-test    range-of-motion sheet (+ clip samples with --clips) for owner approval\n\
 \n\
 flags: --class humanoid|quadruped|custom (default humanoid)\n\
        --clips <glb|folder> (repeatable)  --fps <n> (animate, default 30)\n\
        --blender <path> (pose-test; default BLENDER_BIN, the macOS app, PATH)\n\
+       animate: --no-contact, --weapon R|L|none, --weapon-length, --weapon-clips\n\
 \n\
 RESULT.json: {\"ok\": bool, \"outputs\": [paths relative to its folder], \"tool\": \"motionforge\", ...}\n\
 exit: 0 ok, 1 stage failed (ok false, result written), 2 error (no result)\n";
@@ -390,7 +590,8 @@ fn adapter_animate(input: &str, out: &str, cmd: &Cmd) -> Result<AdapterRun, (i32
         ));
     }
     let doc = load(input)?;
-    let (animated, reports) = match retarget_clips(&doc, &sources, fps) {
+    let contact = contact_opts(cmd)?;
+    let (animated, reports) = match retarget_picked(&doc, &sources, fps, None, contact.as_ref()) {
         Ok(v) => v,
         Err(e) => {
             return Ok(AdapterRun {

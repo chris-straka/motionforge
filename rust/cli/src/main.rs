@@ -34,7 +34,8 @@ commands:\n\
   autopose       predict a full pose from a few effector joints\n\
   clip-info      validate a clip and print its inventory\n\
   standardize    rig GLB -> HLL skeleton (DEF-* names, canonical parents)\n\
-  animate        retarget clip GLBs onto a rigged GLB\n\
+  animate        retarget clip GLBs onto a rigged GLB (+ contact pass)\n\
+  grip           find a weapon clip set's grip, write it into the hand socket\n\
   pose-test      range-of-motion poses as animations (+ rendered sheet)\n\
   fixture-glb    procedural skinned test humanoid GLB\n\
   adapter        genforge character-chain adapter (adapter --help)\n\
@@ -80,6 +81,14 @@ standardize flags:\n\
 \n\
 animate flags:\n\
   --input <glb> --output <glb> --clips <glb|folder> (repeatable) [--fps 30]\n\
+  --pick <name=new,label.glb:name=new,...> (choose, rename and order clips)\n\
+  --no-contact (skip the contact pass)  --weapon R|L|none (default R)\n\
+  --weapon-length <heights> (default 0.75)  --weapon-clips <a,b> (name parts)\n\
+  --contact-ramp <s> (default 0.15)  --proxies <json> (write collision proxies)\n\
+\n\
+grip flags:\n\
+  --input <glb with weapon clips> [--side R|L] [--weapon-length <heights>]\n\
+  [--weapon-clips <a,b>] [--output <glb with the socket turned>]\n\
 \n\
 pose-test flags:\n\
   --input <glb> --output <posed glb> [--sheet <png>] [--clips ...] [--blender <path>]\n\
@@ -128,6 +137,7 @@ fn is_bool_flag(key: &str) -> bool {
             | "no-momentum"
             | "no-balance"
             | "twisted"
+            | "no-contact"
             | "walk"
             | "time"
             | "help"
@@ -615,6 +625,7 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "clip-info" => cmd_clip_info(&args),
             "standardize" => glb_cmds::cmd_standardize(&args),
             "animate" => glb_cmds::cmd_animate(&args),
+            "grip" => glb_cmds::cmd_grip(&args),
             "pose-test" => glb_cmds::cmd_pose_test(&args),
             "fixture-glb" => glb_cmds::cmd_fixture_glb(&args),
             other => Err((1, format!("unknown command '{}'; try --help", other))),
