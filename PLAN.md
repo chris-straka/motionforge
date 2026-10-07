@@ -3,7 +3,7 @@
 Written 2026-10-01 for the coding agents who will build it. Goal: make
 game animation for HLL (a stylized action-adventure, Bevy/Rust) fast for one
 person. Context: `~/SWE/games/tools/roadmap.md`, `~/SWE/games/tools/asset-pipeline.md`
-("Animation" section). The rig is rigforge's (`~/SWE/rigforge`,
+("Animation" section). The rig is rigforge's (`~/SWE/blender/rigforge`,
 Rigify-based, presets `hll_hero` and `hll_stalker`).
 
 ## What it does (three features, in build order)
@@ -33,7 +33,7 @@ Rigify-based, presets `hll_hero` and `hll_stalker`).
 
 - Blender extension (GPL-3.0-or-later) for the UI and Blender I/O.
 - Core math + model inference in a Rust CLI or library (MIT), same split
-  as `~/SWE/retopoforge` (subprocess over files, deterministic).
+  as `~/SWE/blender/retopoforge` (subprocess over files, deterministic).
 - Training in Python (PyTorch, local on an Apple M4, 16 GB). Exported
   model (ONNX or a small custom format) runs on CPU in the Rust core.
 

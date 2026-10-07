@@ -1,7 +1,7 @@
 # motionforge — agent notes
 
 Game-animation sidekick for HLL: retarget assist, motion stylizer,
-physics pass, and ML AutoPose. Same split as `~/SWE/retopoforge`:
+physics pass, and ML AutoPose. Same split as `~/SWE/blender/retopoforge`:
 an MIT-licensed Rust core + CLI, driven as a subprocess over files by
 a GPL Blender extension. Training lives in `python/` (PyTorch, local).
 
@@ -82,11 +82,11 @@ behind it (`docs/measurements.md`).
 
 ## Siblings (separate repos, separate sessions)
 
-- `~/SWE/rigforge` — the rig (Rigify fork, `hll_hero`/`hll_stalker`
+- `~/SWE/blender/rigforge` — the rig (Rigify fork, `hll_hero`/`hll_stalker`
   presets). Its `tools/retarget_mixamo.py` is the reference P1
   implementation; this repo's Rust retarget ports its rotation-transfer
   math onto clip JSON. Never commit game rigs here.
-- `~/SWE/retopoforge` — mesh stage; the structural template
+- `~/SWE/blender/retopoforge` — mesh stage; the structural template
   (workspace layout, subprocess-over-files split, golden tests).
 - `~/SWE/games/hll` — the game (Bevy, Rust; the Godot project was
   removed 2026-10-05). Retargeted clips land there
