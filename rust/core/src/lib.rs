@@ -9,6 +9,7 @@ pub mod clip;
 pub mod contact;
 pub mod detmath;
 pub mod fixture;
+pub mod footpin;
 pub mod glb;
 pub mod helpers;
 pub mod humanoid;

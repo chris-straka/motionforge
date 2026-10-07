@@ -39,6 +39,8 @@ pub struct ClipReport {
     pub root_travel_m: f64,
     /// What the contact pass found and changed (when it ran).
     pub contact: Option<crate::contact::ClipContact>,
+    /// What foot pinning changed (when it ran).
+    pub pin: Option<crate::footpin::PinReport>,
 }
 
 impl ClipReport {
@@ -52,6 +54,16 @@ impl ClipReport {
             ("max_error_deg", Json::num(round(self.max_error_deg, 4))),
             ("root_travel_m", Json::num(round(self.root_travel_m, 4))),
         ];
+        if let Some(p) = &self.pin {
+            fields.push((
+                "pin",
+                Json::obj(vec![
+                    ("plants", Json::num(p.plants as f64)),
+                    ("frames_changed", Json::num(p.frames_changed as f64)),
+                    ("max_shift_m", Json::num(round(p.max_shift, 4))),
+                ]),
+            ));
+        }
         if let Some(c) = &self.contact {
             fields.push(("contact", c.to_json()));
         }
@@ -295,13 +307,25 @@ pub fn retarget_clips(
     retarget_picked(target, sources, fps, None, None)
 }
 
-/// [`retarget_clips`] limited to (and renamed by) `pick`.
+/// [`retarget_clips`] limited to (and renamed by) `pick`, feet pinned.
 pub fn retarget_picked(
     target: &Document,
     sources: &[(String, Document)],
     fps: f64,
     pick: Option<&Pick>,
     contact: Option<&crate::contact::Options>,
+) -> Result<(Document, Vec<ClipReport>), String> {
+    retarget_with(target, sources, fps, pick, contact, true)
+}
+
+/// [`retarget_picked`] with foot pinning (`footpin.rs`) on or off.
+pub fn retarget_with(
+    target: &Document,
+    sources: &[(String, Document)],
+    fps: f64,
+    pick: Option<&Pick>,
+    contact: Option<&crate::contact::Options>,
+    pin: bool,
 ) -> Result<(Document, Vec<ClipReport>), String> {
     let tgt = Mapped::new(target)?;
     let mut out = target.clone();
@@ -412,6 +436,14 @@ pub fn retarget_picked(
                 max_err = max_err.max(err);
                 posed.push(locals);
             }
+            // Planted feet stay planted when the legs differ (`footpin.rs`).
+            let pin_report = if pin {
+                Some(crate::footpin::pin_feet(
+                    src, &tgt, transfer, anim, &times, &mut posed,
+                ))
+            } else {
+                None
+            };
             // Contact pass on the character's own body (`contact.rs`).
             let contact_report = match (&body, contact) {
                 (Some(b), Some(o)) => Some(crate::contact::fix_clip(
@@ -440,6 +472,7 @@ pub fn retarget_picked(
                 max_error_deg: max_err.to_degrees(),
                 root_travel_m: root_travel,
                 contact: contact_report,
+                pin: pin_report,
             });
         }
     }

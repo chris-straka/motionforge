@@ -8,7 +8,7 @@
 // Exit 0 = ok, 1 = ran but the stage failed (result written, ok false),
 // 2 = error (no result written, so the chain stops instead of guessing).
 
-use motion_core::animate::{parse_pick, retarget_clips, retarget_picked, round};
+use motion_core::animate::{parse_pick, retarget_clips, retarget_with, round};
 use motion_core::contact::Options as ContactOptions;
 use motion_core::fixture::{self, Naming};
 use motion_core::glb::Document;
@@ -195,7 +195,8 @@ pub fn cmd_animate(cmd: &Cmd) -> CmdResult {
         None => None,
     };
     let contact = contact_opts(cmd)?;
-    let (out, reports) = retarget_picked(&doc, &sources, fps, pick.as_ref(), contact.as_ref())
+    let pin = !cmd.flag("no-pin");
+    let (out, reports) = retarget_with(&doc, &sources, fps, pick.as_ref(), contact.as_ref(), pin)
         .map_err(|e| (3, e))?;
     if let Some(path) = cmd.get("proxies") {
         let rig = motion_core::rig::Rig::from_doc(&doc).map_err(|e| (3, e))?;
@@ -217,6 +218,14 @@ pub fn cmd_animate(cmd: &Cmd) -> CmdResult {
             round(c.max_error_deg, 6),
             round(c.root_travel_m, 4)
         ));
+        if let Some(p) = &c.pin {
+            r.push_str(&format!(
+                "  pin: {} plants, {} frames, ankle moved up to {:.1} cm\n",
+                p.plants,
+                p.frames_changed,
+                p.max_shift * 100.0
+            ));
+        }
         if let Some(ct) = &c.contact {
             r.push_str(&contact_line(ct));
         }
@@ -490,7 +499,7 @@ const ADAPTER_HELP: &str = "usage: motionforge adapter <standardize|animate|pose
 flags: --class humanoid|quadruped|custom (default humanoid)\n\
        --clips <glb|folder> (repeatable)  --fps <n> (animate, default 30)\n\
        --blender <path> (pose-test; default BLENDER_BIN, the macOS app, PATH)\n\
-       animate: --no-contact, --weapon R|L|none, --weapon-length, --weapon-clips\n\
+       animate: --no-pin, --no-contact, --weapon R|L|none, --weapon-length, --weapon-clips\n\
 \n\
 RESULT.json: {\"ok\": bool, \"outputs\": [paths relative to its folder], \"tool\": \"motionforge\", ...}\n\
 exit: 0 ok, 1 stage failed (ok false, result written), 2 error (no result)\n";
@@ -591,7 +600,14 @@ fn adapter_animate(input: &str, out: &str, cmd: &Cmd) -> Result<AdapterRun, (i32
     }
     let doc = load(input)?;
     let contact = contact_opts(cmd)?;
-    let (animated, reports) = match retarget_picked(&doc, &sources, fps, None, contact.as_ref()) {
+    let (animated, reports) = match retarget_with(
+        &doc,
+        &sources,
+        fps,
+        None,
+        contact.as_ref(),
+        !cmd.flag("no-pin"),
+    ) {
         Ok(v) => v,
         Err(e) => {
             return Ok(AdapterRun {

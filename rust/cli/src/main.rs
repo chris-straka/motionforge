@@ -82,7 +82,8 @@ standardize flags:\n\
 animate flags:\n\
   --input <glb> --output <glb> --clips <glb|folder> (repeatable) [--fps 30]\n\
   --pick <name=new,label.glb:name=new,...> (choose, rename and order clips)\n\
-  --no-contact (skip the contact pass)  --weapon R|L|none (default R)\n\
+  --no-pin (keep feet unpinned)  --no-contact (skip the contact pass)\n\
+  --weapon R|L|none (default R)\n\
   --weapon-length <heights> (default 0.75)  --weapon-clips <a,b> (name parts)\n\
   --contact-ramp <s> (default 0.15)  --proxies <json> (write collision proxies)\n\
 \n\
