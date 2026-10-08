@@ -2,7 +2,7 @@
 
 Written 2026-10-01 for the coding agents who will build it. Goal: make
 game animation for HLL (a stylized action-adventure, Bevy/Rust) fast for one
-person. Context: `~/SWE/games/tools/roadmap.md`, `~/SWE/games/tools/asset-pipeline.md`
+person. Context: `~/SWE/games/_tools/roadmap.md`, `~/SWE/games/_tools/asset-pipeline.md`
 ("Animation" section). The rig is rigforge's (`~/SWE/blender/rigforge`,
 Rigify-based, presets `hll_hero` and `hll_stalker`).
 
