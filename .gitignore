@@ -1,7 +1,7 @@
 # Local-only data (never commit: mocap, clips, weights, runs)
 data/
 models/
-bench/
+/bench/
 *.fbx
 *.blend
 *.blend1
