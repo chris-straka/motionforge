@@ -13,8 +13,8 @@ samples per row, each an orthographic three-quarter view framed on that
 clip's whole motion (so travel shows), labeled "clip t=0.42s". With
 --sword, the GLB's first mesh is parented to the `Socket_Hand_R` node
 (motionforge standardize adds it; blade along the socket's +Y), scaled by
---sword-scale times character height / 2.0 (HLL's sword is sized for a
-2.0-unit Andras). With --video, every frame of every clip is rendered at
+--sword-scale times character height / 2.0 (the reference sword is sized
+for a 2.0-unit hero). With --video, every frame of every clip is rendered at
 30 fps and joined into one MP4 with ffmpeg. With --at, each listed
 clip@seconds is one row instead, framed on that pose; with --compare the
 same rows are rendered from OTHER.glb too and placed after the first

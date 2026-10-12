@@ -25,7 +25,7 @@ numbers and commands in `docs/measurements.md`.
       heading item below, to retrain only once).
 - [ ] Look at a stylized walk in Blender after #4 (P2 gate: owner
       prefers stylized on 3 test clips).
-- [ ] P1 gate: a Mixamo clip on `hll_hero` in the Bevy game with no foot slide.
+- [ ] P1 gate: a Mixamo clip on `biped_hero` in the Bevy game with no foot slide.
 
 ## Next code tasks (agent-ready)
 

@@ -187,7 +187,7 @@ class TestInference(unittest.TestCase):
 class TestLimits(unittest.TestCase):
     def test_load_fixture(self):
         lim = limits.load_limits(os.path.join(FIX, "limits_hero.json"))
-        self.assertEqual(lim["rig"], "hll_hero")
+        self.assertEqual(lim["rig"], "biped_hero")
         self.assertEqual(len(lim["bones"]), 14)
         self.assertEqual(lim["bones"]["DEF-spine"], 45.0)
 

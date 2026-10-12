@@ -491,7 +491,7 @@ fn render_sheet(
 
 const ADAPTER_HELP: &str = "usage: motionforge adapter <standardize|animate|pose-test> IN.glb OUT.glb RESULT.json [flags]\n\
 \n\
-  standardize  rename/reparent the rig onto the HLL skeleton (DEF-* names)\n\
+  standardize  rename/reparent the rig onto the standard humanoid skeleton (DEF-* names)\n\
   animate      retarget clip GLBs onto the character (--clips required), then\n\
                the contact pass (hands, forearms, held weapon out of the body)\n\
   pose-test    range-of-motion sheet (+ clip samples with --clips) for owner approval\n\

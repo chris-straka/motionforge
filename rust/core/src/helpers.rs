@@ -1,4 +1,4 @@
-//! Twist/helper bones of the HLL humanoid skeleton.
+//! Twist/helper bones of the standard humanoid skeleton.
 //!
 //! Linear blend skinning collapses and stretches the armpit and groin
 //! when an upper arm or thigh swings 90 degrees or more: a vertex shared
@@ -11,7 +11,7 @@
 //! The pipeline bakes the helper's rotation into every clip (`animate`)
 //! and pose (`posetest`), so a game plays them as ordinary keyed joints
 //! with no runtime constraint code. Each helper node carries
-//! `extras.hll_helper = {"driver": <limb>, "share": 0.5}` so tools that
+//! `extras.helper_bone = {"driver": <limb>, "share": 0.5}` so tools that
 //! pose the rig (weightforge) can drive it the same way.
 
 use crate::glb::{node_trs, set_node_trs, Document};
@@ -115,7 +115,7 @@ pub fn insert(doc: &mut Document) -> Result<Inserted, String> {
             (
                 "extras",
                 Json::obj(vec![(
-                    "hll_helper",
+                    "helper_bone",
                     Json::obj(vec![
                         ("driver", Json::str(&driver)),
                         ("share", Json::num(SHARE)),

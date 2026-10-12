@@ -1,10 +1,10 @@
 # motionforge — build plan
 
 Written 2026-10-01 for the coding agents who will build it. Goal: make
-game animation for HLL (a stylized action-adventure, Bevy/Rust) fast for one
+game animation for a stylized action game (Bevy/Rust) fast for one
 person. Context: `~/Games/_tools/roadmap.md`, `~/Games/_tools/asset-pipeline.md`
 ("Animation" section). The rig is rigforge's (`~/Games/_blender/rigforge`,
-Rigify-based, presets `hll_hero` and `hll_stalker`).
+Rigify-based, presets `biped_hero` and `quadruped_stalker`).
 
 ## What it does (three features, in build order)
 
@@ -61,7 +61,7 @@ Rigify-based, presets `hll_hero` and `hll_stalker`).
 | Phase | Builds | Gate |
 |---|---|---|
 | P0 | Repo scaffold (Rust workspace, Blender extension, AGENTS.md: no game assets committed, determinism, licensing rules) | builds, CLI `--help` |
-| P1 | Retarget assist | a Mixamo clip plays on the `hll_hero` rig in the Bevy game with no foot sliding |
+| P1 | Retarget assist | a Mixamo clip plays on the `biped_hero` rig in the Bevy game with no foot sliding |
 | P2 | Motion stylizer | owner prefers the stylized version of 3 test clips |
 | P3 | Data pipeline for AutoPose (licensed sources only, retargeted) | dataset manifest with source + license per clip |
 | P4 | AutoPose training + Rust inference + Blender tool | gates above; owner keyframes one attack faster than without it |
@@ -69,7 +69,7 @@ Rigify-based, presets `hll_hero` and `hll_stalker`).
 ## genforge adapters (built 2026-10-05)
 
 genforge's `gen character` chain needs three local stages from this
-repo: `standardize` (rename/reparent a Tripo or other rig onto the HLL
+repo: `standardize` (rename/reparent a Tripo or other rig onto the standard
 humanoid skeleton so every character shares clips), `animate`
 (retarget clip GLBs onto the character) and `pose-test` (range-of-motion
 sheet for the owner's approval). Built as GLB commands in the Rust core

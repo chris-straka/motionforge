@@ -1,6 +1,6 @@
 # Contact pass, hand sockets, grip and clip picks
 
-Built 2026-10-06 for the HLL character chain (genforge `gen character`,
+Built 2026-10-06 for the game character chain (genforge `gen character`,
 stage `animate`). Code: `rust/core/src/contact.rs`, `animate.rs`
 (`retarget_picked`, `sync_sockets`), `standardize.rs` (sockets),
 `glb.rs` (`compact`); CLI `animate`, `grip`; renderer
@@ -21,8 +21,8 @@ gets it and the game needs no code.
    sets the radius, extra width the side offset), a head capsule, thigh
    capsules; per arm a forearm and a hand capsule; on the weapon hand a
    blade capsule from `Socket_Hand_R` along its +Y (`--weapon-length`,
-   in character heights, default 0.75: HLL's sword tip sits 1.5 units
-   from the grip on the 2.0-unit Andras). Body surface points (torso,
+   in character heights, default 0.75: a reference sword tip sits 1.5 units
+   from the grip on a 2.0-unit hero). Body surface points (torso,
    head, thigh vertices no arm bone moves) catch shallow contacts the
    capsules miss.
 2. **Per frame**: find the wrist offset that clears every contact (push
@@ -57,7 +57,7 @@ fitted capsules.
 `standardize` adds `Socket_Hand_L/R` (plain nodes under the hands, not
 joints): 45% along the hand, blade (+Y) across the palm from the little
 finger's knuckle to the index finger's when the rig has fingers, else
-the character's front (the hand-built Andras rule). The HLL game holds
+the character's front (the hand-built hero rig's rule). A game holds
 its sword at `Socket_Hand_R`.
 
 A clip set implies a grip: `motionforge grip --input LIB.glb` scores 98
@@ -83,7 +83,7 @@ Tests: `cargo test --locked --release` = 75 core unit + 4 contact
 eased, clean clips are untouched, sockets, picks) + 13 rig-adapter +
 3 adapter contract + 10 CLI goldens.
 
-Andras after the weights gate (genforge rehearsal, SkinTokens rig,
+The stylized hero after the weights gate (genforge rehearsal, SkinTokens rig,
 4,459 verts), the 13-clip CC0 library (`adapter animate`, contact on):
 22 clip-arms cut the mesh before (1 to 76 frames, up to 12.3 cm deep);
 21 are clear after; attack_2 keeps one blade frame at 2.0 cm (wrist at
@@ -103,7 +103,7 @@ results).
 | hit | R | 11 | 12.3 cm | 0 | 14.4 cm |
 
 (full list in `RESULT.json`). The library's slim mannequin arms hang
-inside Andras's hips; the pass opens them about 10 cm.
+inside the hero's hips; the pass opens them about 10 cm.
 
 Grip on the CC0 library's eight sword clips (209 frames): the
 knuckle-line socket hit the body 42 times, the found grip 0.

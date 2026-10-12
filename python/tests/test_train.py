@@ -86,7 +86,7 @@ class TestDryRun(unittest.TestCase):
                          "--limits", os.path.join(FIX, "limits_hero.json"))
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertIn("limits:", proc.stdout)
-        self.assertIn("hll_hero", proc.stdout)
+        self.assertIn("biped_hero", proc.stdout)
 
     def test_bad_limits_errors_cleanly(self):
         bad = os.path.join(self.tmp.name, "bad.json")

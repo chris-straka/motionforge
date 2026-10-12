@@ -2,7 +2,7 @@
 # Fetch the CC0 clip library for tools/bench/bench.py (outside the repo).
 #   Quaternius Universal Animation Library 1 + 2 [Standard], CC0 1.0
 #   (itch.io free downloads; License.txt in each zip). Checksums match the
-#   HLL provenance log (~/SWE/games/tools/asset-pipeline.md).
+#   asset provenance log (~/Games/_tools/asset-pipeline.md).
 # Bodies come from weightforge's corpus: ~/SWE/blender/weightforge/bench/corpus/fetch.sh
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"

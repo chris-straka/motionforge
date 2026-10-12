@@ -3,7 +3,7 @@
 //!
 //! Retargeted or hand-keyed FK clips know nothing about the character's
 //! surface, so a swing made on a slim rig cuts through a broad chest
-//! (HLL's attack_1/attack_2 placeholders put the sword hand through the
+//! (e.g. placeholder attack_1/attack_2 clips put the sword hand through the
 //! torso). This pass gives the character simple collision proxies and
 //! moves the arm out of the body per frame with two-bone IK, eased in
 //! and out over time so the swing keeps its timing and arc.
@@ -45,7 +45,7 @@ pub struct Options {
     /// Hand that holds the weapon ("R", "L") or none.
     pub weapon_side: Option<String>,
     /// Blade length from the socket to the tip, in character heights
-    /// (HLL's sword: tip 1.5 units from the grip on the 2.0-unit Andras).
+    /// (a reference sword: tip 1.5 units from the grip on a 2.0-unit hero).
     pub weapon_length: f64,
     /// Clip-name fragments (case-insensitive) that hold the weapon; other
     /// clips get no weapon proxy. Empty = every clip.
@@ -1251,8 +1251,8 @@ fn hand_dir(rig: &Rig, map: &Mapping, side: &str) -> Option<Vec3> {
 }
 
 /// Add `Socket_Hand_L/R` under each hand when missing: a plain node (not a
-/// joint) where a game attaches a held weapon, the HLL convention from
-/// the hand-built Andras rig: 45% along the hand, local +Y (the blade)
+/// joint) where a game attaches a held weapon, the convention from
+/// a hand-built hero rig: 45% along the hand, local +Y (the blade)
 /// pointing at the character's front in the rest pose, local +Z down.
 /// Returns the sockets added.
 pub fn insert_sockets(doc: &mut Document) -> Result<Vec<String>, String> {
@@ -1290,7 +1290,7 @@ pub fn insert_sockets(doc: &mut Document) -> Result<Vec<String>, String> {
         let pos = w + hdir.scale(0.45 * hlen.max(1e-4));
         // Blade: across the palm from the little finger's knuckle to the
         // index finger's (the axis a fist closes around) when the hand has
-        // fingers; else the character's front (the hand-built Andras rule).
+        // fingers; else the character's front (the hand-built hero rule).
         let knuckles = (
             map.node_of(&format!("DEF-f_index.01.{side}")),
             map.node_of(&format!("DEF-f_pinky.01.{side}")),

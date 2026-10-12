@@ -1,4 +1,4 @@
-//! Standardize a rigged GLB onto the HLL skeleton.
+//! Standardize a rigged GLB onto the standard humanoid skeleton.
 //!
 //! Humanoids: joints are renamed to the canonical `DEF-*` names
 //! (`humanoid.rs`), reparented into the canonical chain with every

@@ -1,7 +1,7 @@
 {
   "format": "motionforge-bonemap",
   "version": 1,
-  "_note": "Mixamo clip -> rigforge hll_hero DEF bones. Source names are SHORT (mixamorig: prefix is stripped on export by the motionforge retarget operator). Ported from rigforge tools/retarget_mixamo.py MIXAMO_TO_DEF + FOLLOWERS.",
+  "_note": "Mixamo clip -> rigforge biped_hero DEF bones. Source names are SHORT (mixamorig: prefix is stripped on export by the motionforge retarget operator). Ported from rigforge tools/retarget_mixamo.py MIXAMO_TO_DEF + FOLLOWERS.",
   "pairs": [
     {"source": "Hips", "target": "DEF-spine"},
     {"source": "Spine", "target": "DEF-spine.001"},

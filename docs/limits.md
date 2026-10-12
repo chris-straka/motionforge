@@ -10,7 +10,7 @@ owns the format and both consumers.
 {
   "format": "motionforge-limits",
   "version": 1,
-  "rig": "hll_hero",
+  "rig": "biped_hero",
   "bones": {
     "DEF-thigh.L": {"max_angle_deg": 120.0},
     "DEF-shin.L": {"max_angle_deg": 150.0}
@@ -51,7 +51,7 @@ sides (`test_python_matches_rust_limit_report`).
 
 ## rigforge handoff
 
-rigforge exports one table per preset (`hll_hero`, `hll_stalker`) from
+rigforge exports one table per preset (`biped_hero`, `quadruped_stalker`) from
 the Blender rig:
 
 1. Source of truth: a hand-authored per-bone max-angle table checked

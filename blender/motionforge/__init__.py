@@ -30,7 +30,7 @@ from . import cli, clip_io
 ADDON_ID = __package__
 
 PRESET_MAPS = {
-    "MIXAMO_HERO": ("mixamo_hllhero.json", "Mixamo -> HLL Hero"),
+    "MIXAMO_HERO": ("mixamo_biped_hero.json", "Mixamo -> Biped Hero"),
 }
 
 
@@ -124,7 +124,7 @@ class MOTIONFORGE_PG_params(bpy.types.PropertyGroup):
         name="Bone Map",
         description="Correspondence preset, or a custom bonemap file",
         items=[
-            ("MIXAMO_HERO", "Mixamo -> HLL Hero", "Mixamo clip onto the rigforge hll_hero DEF bones"),
+            ("MIXAMO_HERO", "Mixamo -> Biped Hero", "Mixamo clip onto the rigforge biped_hero DEF bones"),
             ("CUSTOM", "Custom", "Use the bonemap path below"),
         ],
         default="MIXAMO_HERO",

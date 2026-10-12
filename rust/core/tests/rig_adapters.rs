@@ -187,7 +187,7 @@ fn standardize_maps_mixamo_names_and_merges_extras() {
         .iter()
         .any(|(a, b)| a == "mixamorig:LeftHandPinky4" && b == "DEF-hand.L"));
     assert!(report.merged.iter().any(|(a, _)| a == "Root"));
-    // 24 HLL bones + the four twist/helpers.
+    // 24 standard humanoid bones + the four twist/helpers.
     assert_eq!(report.joints_out, 28);
     assert_eq!(
         report.helpers,
@@ -457,7 +457,7 @@ fn standardize_adds_unweighted_helpers_on_their_drivers() {
         let extras = out.array("nodes")[h]
             .get("extras")
             .unwrap()
-            .get("hll_helper")
+            .get("helper_bone")
             .unwrap();
         assert_eq!(
             extras.get("driver").unwrap().as_str(),

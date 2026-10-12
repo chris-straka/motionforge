@@ -1,6 +1,6 @@
 # motionforge
 
-Game-animation sidekick for HLL (Bevy/Rust action-adventure): retarget
+Game-animation sidekick for Bevy/Rust games: retarget
 assist, motion stylizer, physics pass, ML AutoPose, and the GLB rig
 adapters genforge's character chain runs (standardize, animate,
 pose-test; `docs/adapters.md`). One person,
@@ -38,7 +38,7 @@ Install the Blender extension from `blender/motionforge`
 ```bash
 motionforge --help
 motionforge retarget --source SRC.json --target hero_skel.json \\
-    --map blender/motionforge/presets/mixamo_hllhero.json --output OUT.json
+    --map blender/motionforge/presets/mixamo_biped_hero.json --output OUT.json
 motionforge stylize --input IN.json --output OUT.json --exaggeration 1.35
 motionforge physics-check --input IN.json --root DEF-spine --feet DEF-foot.L,DEF-foot.R
 motionforge physics-fix --input IN.json --output OUT.json --root DEF-spine --feet DEF-foot.L,DEF-foot.R
@@ -54,7 +54,7 @@ motionforge adapter standardize|animate|pose-test IN.glb OUT.glb RESULT.json [fl
 ```
 
 The GLB commands and the genforge `adapter` contract are in
-`docs/adapters.md` (HLL humanoid skeleton, mapping rules, limits).
+`docs/adapters.md` (standard humanoid skeleton, mapping rules, limits).
 `animate` ends with the **contact pass** (`docs/contact.md`): collision
 proxies fitted to the character's mesh, two-bone arm IK that eases the
 hands, forearms and a held weapon out of the body per frame, verified on

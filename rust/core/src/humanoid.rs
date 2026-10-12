@@ -1,6 +1,6 @@
-//! The HLL humanoid skeleton and an auto-mapper from other rigs onto it.
+//! The standard humanoid skeleton and an auto-mapper from other rigs onto it.
 //!
-//! Canonical names are rigforge's `hll_hero` deform bones (Rigify `DEF-*`
+//! Canonical names are rigforge's `biped_hero` deform bones (Rigify `DEF-*`
 //! naming), so clips made on the rigforge hero rig and clips retargeted
 //! by motionforge address the same bones. The table below is the bone
 //! set of rigforge's mobile game export (65 bones) plus four twist/helper

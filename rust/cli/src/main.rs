@@ -21,7 +21,7 @@ mod glb_cmds;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-const HELP: &str = "motionforge {VERSION} — game-animation sidekick for HLL\n\
+const HELP: &str = "motionforge {VERSION} — game-animation sidekick for Bevy games\n\
 \n\
 usage: motionforge <command> [flags]\n\
 \n\
@@ -33,7 +33,7 @@ commands:\n\
   physics-fix    fix ballistic + momentum errors via root curves\n\
   autopose       predict a full pose from a few effector joints\n\
   clip-info      validate a clip and print its inventory\n\
-  standardize    rig GLB -> HLL skeleton (DEF-* names, canonical parents)\n\
+  standardize    rig GLB -> standard humanoid skeleton (DEF-* names, canonical parents)\n\
   animate        retarget clip GLBs onto a rigged GLB (+ contact pass)\n\
   grip           find a weapon clip set's grip, write it into the hand socket\n\
   pose-test      range-of-motion poses as animations (+ rendered sheet)\n\

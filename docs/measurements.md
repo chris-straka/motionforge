@@ -133,7 +133,7 @@ through standardize/animate/pose-test.
 
 ## Pending owner gates (not runnable here)
 
-- P1: a Mixamo clip plays on the hll_hero rig in the Bevy game with no
+- P1: a Mixamo clip plays on the biped_hero rig in the Bevy game with no
   foot sliding (needs owner Mixamo account + a Bevy scene check).
 - P2: owner prefers the stylized version of 3 test clips.
 - P4: owner keyframes one attack faster with AutoPose; 10 ms holds on

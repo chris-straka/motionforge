@@ -133,7 +133,7 @@ mod tests {
     use super::*;
 
     const TABLE: &str = r#"{
-        "format": "motionforge-limits", "version": 1, "rig": "hll_hero",
+        "format": "motionforge-limits", "version": 1, "rig": "biped_hero",
         "bones": {
             "DEF-shin.L": {"max_angle_deg": 150.0},
             "DEF-foot.L": {"max_angle_deg": 70.0}
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn parses_and_sorts() {
         let lim = parse_limits(TABLE).unwrap();
-        assert_eq!(lim.rig, "hll_hero");
+        assert_eq!(lim.rig, "biped_hero");
         assert_eq!(lim.max_deg.len(), 2);
         assert!(lim.max_deg[0].0 < lim.max_deg[1].0);
         assert_eq!(lim.max_for("DEF-foot.L"), Some(70.0));

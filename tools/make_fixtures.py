@@ -213,7 +213,7 @@ def main():
         frames.append(fr)
     emit_clip(os.path.join(OUT, "walk_src.json"), 30, src, frames)
 
-    # --- hero target skeleton (HLL-like, faces -Y, shorter legs) ------------
+    # --- hero target skeleton (rigforge-hero-like, faces -Y, shorter legs) ------------
     hero_bones = [
         ("DEF-spine", None, (0, 0, 0.70), (0, 0, 0.80)),
         ("DEF-spine.001", "DEF-spine", (0, 0, 0.80), (0, 0, 1.05)),

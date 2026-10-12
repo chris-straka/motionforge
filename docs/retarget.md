@@ -2,7 +2,7 @@
 
 One click from a Mixamo FBX, Cascadeur export, or video-to-motion clip
 onto the rigforge rig, saved as a Blender action and exported for
-game (HLL runs on Bevy). The Blender operator handles FBX/action/GLB I/O; the Rust core
+game (the games run on Bevy). The Blender operator handles FBX/action/GLB I/O; the Rust core
 does the frame math; the report validates bone mapping, foot contacts,
 and root motion.
 
@@ -11,7 +11,7 @@ and root motion.
 1. Import the clip into Blender (Mixamo FBX via `io_scene_fbx`, or any
    armature + action). Its rest pose should be a neutral stance.
 2. Select the rigforge rig (active object), pick the source armature in
-   the MotionForge panel, choose the `Mixamo -> HLL Hero` bonemap
+   the MotionForge panel, choose the `Mixamo -> Biped Hero` bonemap
    preset (or a custom file), run Retarget.
 3. The operator exports the source action (stripping `mixamorig:` /
    `mixamorig_` prefixes to the bonemap short form) and the target
@@ -84,6 +84,6 @@ and reported honestly.
 
 ```bash
 ./rust/target/release/motionforge retarget --source SRC.json --target TGT.json \\
-    --map blender/motionforge/presets/mixamo_hllhero.json --output OUT.json
+    --map blender/motionforge/presets/mixamo_biped_hero.json --output OUT.json
 ./rust/target/release/motionforge retarget --help  # --yaw auto|flip|none, --pin/--no-pin
 ```

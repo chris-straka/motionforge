@@ -31,9 +31,9 @@ spinnable view) next to `OUT.glb`, and passes the model on unchanged
 as `OUT.glb`; `outputs` lists the sheet first (genforge's preview) and
 the model last (the next stage's input).
 
-## The HLL humanoid skeleton
+## The standard humanoid skeleton
 
-Canonical names are rigforge's `hll_hero` deform bones, and the table
+Canonical names are rigforge's `biped_hero` deform bones, and the table
 (`humanoid::canonical`) is the 65-bone set of rigforge's mobile game
 export: spine chain `DEF-spine` (hips) to `DEF-spine.006` (head),
 shoulders, arms, hands, palms, three-segment fingers, pelvis, breast,
@@ -54,7 +54,7 @@ classic counter-roll twist bone: the poses that fail weightforge's gate
 (arm up, arm forward, hip forward) are pure swings with zero roll, so a
 roll-only bone does nothing there; a half-swing joint lets the armpit and
 groin blend over two 45 deg steps instead of one 90 deg step. Nodes carry
-`extras.hll_helper = {"driver", "share"}`. The 69-bone canonical table
+`extras.helper_bone = {"driver", "share"}`. The 69-bone canonical table
 lists them after their driver's siblings.
 
 Why motionforge and not rigforge: standardizing is what makes clips
@@ -167,7 +167,7 @@ six-column PNG.
   post-animation recheck to delivery.
 - Twist/helpers (2026-10-05): `cargo test --locked --release` is 72 core
   unit + 13 rig-adapter + 3 adapter contract + 10 CLI goldens. On the
-  SkinTokens rig of the Andras game mesh (5,766 verts) standardize gives
+  SkinTokens rig of a stylized hero game mesh (5,766 verts) standardize gives
   22 + 4 helper joints; weightforge with the helpers scores 47.6 raw ->
   68.8 after `weights fix` (2 failing regions left) vs 47.3 -> 62.8 (4)
   without them. Numbers and sheets: weightforge README, "Twist/helper
@@ -177,7 +177,7 @@ six-column PNG.
 
 Owner decision: shoulder helper bones first, corrective shapes only if
 weightforge still shows shoulder collapse. Two designs were built and
-measured on Andras (genforge rehearsal rig, after the weights gate) with
+measured on the hero (genforge rehearsal rig, after the weights gate) with
 weightforge's post-animation fix; neither beat the existing half-turn
 twist helper, so neither ships (patches kept outside the repo):
 
