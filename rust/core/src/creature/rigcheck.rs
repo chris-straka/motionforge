@@ -211,7 +211,55 @@ pub fn read_mesh(doc: &Document, rig: &Rig) -> Result<Mesh, String> {
     if verts.is_empty() {
         return Err("GLB has no triangle mesh".into());
     }
-    Ok(Mesh { verts, tris })
+    Ok(drop_debris(Mesh { verts, tris }, 0.02))
+}
+
+/// Drop connected components holding fewer than `fraction` of the
+/// vertices (floating debris a generator leaves under the feet would
+/// otherwise set the ground and the bounds).
+pub fn drop_debris(mesh: Mesh, fraction: f64) -> Mesh {
+    let n = mesh.verts.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for t in &mesh.tris {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2])] {
+            let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
+            if ra != rb {
+                parent[ra.max(rb)] = ra.min(rb);
+            }
+        }
+    }
+    let mut count = vec![0usize; n];
+    let roots: Vec<usize> = (0..n).map(|i| find(&mut parent, i)).collect();
+    for &r in &roots {
+        count[r] += 1;
+    }
+    let min = ((n as f64) * fraction).ceil() as usize;
+    let keep: Vec<bool> = (0..n).map(|i| count[roots[i]] >= min).collect();
+    if keep.iter().all(|k| *k) {
+        return mesh;
+    }
+    let mut remap = vec![usize::MAX; n];
+    let mut verts = Vec::new();
+    for i in 0..n {
+        if keep[i] {
+            remap[i] = verts.len();
+            verts.push(mesh.verts[i]);
+        }
+    }
+    let tris = mesh
+        .tris
+        .iter()
+        .filter(|t| t.iter().all(|&i| keep[i]))
+        .map(|t| [remap[t[0]], remap[t[1]], remap[t[2]]])
+        .collect();
+    Mesh { verts, tris }
 }
 
 impl Mesh {
@@ -463,29 +511,53 @@ pub fn from_glb(doc: &Document, opts: &Options) -> Result<Built, String> {
             .collect()
     };
 
-    // Fingers: leaves within `tiny` of their parent, and hands (a joint
-    // with three or more leaf children all within `hand` of it) fold
-    // into the parent.
+    // Fingers: a hand (a joint whose three or more child chains all stay
+    // within `hand` of it; a pelvis or chest has far longer chains) folds
+    // every digit in, and leaves within `tiny` of their parent fold into
+    // it. Generated creatures have big hands: a quarter of the height.
     let tiny = 0.03 * height;
-    let hand = 0.09 * height;
+    let hand = 0.25 * height;
+    fn subtree(jparent: &[Option<usize>], keep: &[bool], root: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(i) = stack.pop() {
+            out.push(i);
+            for c in 0..jparent.len() {
+                if keep[c] && jparent[c] == Some(i) {
+                    stack.push(c);
+                }
+            }
+        }
+        out
+    }
+    for i in 0..nj {
+        if !keep[i] || jparent[i].is_none() {
+            continue;
+        }
+        let digits: Vec<Vec<usize>> = kids(&keep, i)
+            .into_iter()
+            .map(|c| subtree(&jparent, &keep, c))
+            .filter(|sub| sub.iter().all(|&j| (heads[j] - heads[i]).length() <= hand))
+            .collect();
+        if digits.len() >= 3 {
+            for sub in digits {
+                for j in sub {
+                    if keep[j] {
+                        keep[j] = false;
+                        checks.fingers_folded += 1;
+                    }
+                }
+            }
+        }
+    }
     loop {
         let mut changed = false;
         for i in 0..nj {
             if !keep[i] {
                 continue;
             }
-            let ks = kids(&keep, i);
-            let leaves: Vec<usize> = ks
-                .iter()
-                .copied()
-                .filter(|&c| kids(&keep, c).is_empty())
-                .collect();
-            let hand_like = leaves.len() >= 3
-                && leaves
-                    .iter()
-                    .all(|&c| (heads[c] - heads[i]).length() <= hand);
-            for &c in &leaves {
-                if hand_like || (heads[c] - heads[i]).length() <= tiny {
+            for c in kids(&keep, i) {
+                if kids(&keep, c).is_empty() && (heads[c] - heads[i]).length() <= tiny {
                     keep[c] = false;
                     checks.fingers_folded += 1;
                     changed = true;
