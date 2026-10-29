@@ -49,9 +49,12 @@ class Data:
 
     def get(self, i):
         if i not in self.cache:
+            from PIL import Image
+            import numpy as np
+
             path, _ = self.items[i]
-            img = finder.to_input(finder.load_image(path))
-            self.cache[i] = (img * 255).round().to(torch.uint8)
+            im = Image.open(path).convert("RGB").resize((finder.INPUT, finder.INPUT), Image.BILINEAR)
+            self.cache[i] = torch.from_numpy(np.asarray(im).copy()).permute(2, 0, 1).contiguous()  # uint8
         return self.cache[i]
 
     def targets(self, i, view_size):
@@ -105,6 +108,7 @@ def main():
     ap.add_argument("--view-size", type=int, default=512)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
+    torch.set_num_threads(4)
     finder.seed_all(args.seed)
     rng = random.Random(args.seed)
     joints, views, items = load_truth(args.renders)

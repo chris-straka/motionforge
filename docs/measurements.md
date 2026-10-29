@@ -131,6 +131,61 @@ through standardize/animate/pose-test.
 - Torch modules compile: `python3 -m py_compile
   python/autopose/model.py python/autopose/train.py`.
 
+## Creature motion (2026-10-29, f: RTX 2060 SUPER 8 GB, Blender 5.2.1, torch 2.7.1+cu128)
+
+Spec: `docs/creature.md`. Stand-ins: `gen 3d text` (SDXL reference ->
+TripoSG, MIT, $0): a low-poly wolf (40k faces, 3 min) and a rock golem
+biped (2 min). Meshes, rigs, renders and weights stay local.
+
+- Rig tries, `skintokens rig` on CPU (no CUDA build): 365-640 s per
+  try. `motionforge creature-profile` checks (`tools/creature_rig.py`):
+  wolf seeds 1/2/3 -> 32/41/29 bones, 4 of 4 legs grounded, mirror
+  16/20, 24/31, 17/18, scores 1.400 / 1.370 / 1.472 (seed 3 kept);
+  golem seeds 1/2/3 -> 46/40/44 joints with 24/18/23 finger joints
+  folded into the hands -> 22/22/21 bones, 2 of 2 legs grounded once
+  the floating debris under the feet (<2% of the vertices) is ignored,
+  mirror 16/16, all 1.500 (seed 1 kept). Facing: wolf -X from the ears
+  sitting 0.57 m forward of the centre; golem head over the centre ->
+  glTF +Z.
+- Rust vs Blender: `render.py` FK self-check, max head mismatch 4.6e-7 m;
+  `creature-project` vs Blender's `world_to_camera_view` on 6 samples x
+  2 views x 29 joints: max 0.0001 px.
+- Training renders: `creature-poses --count 3000 --seed 1`, `render.py
+  --mode poses --samples 16`, Eevee: 0.34 s per sample (two 512x512
+  views), 17 min per creature; 3 frames keyed per sample (keying the
+  whole 9,000-frame clip was quadratic in Blender).
+- Joint finder, `train.py --epochs 12 --batch 16` on 6,000 view images
+  (10% held out), dinov2-small + conv decoder, fp16: wolf 1,517 s, peak
+  3,996 MB VRAM, held-out 6.35 px mean / 4.14 px median / 84.9% within
+  10 px (degraded 7.41 px); golem 1,393 s, 3,964 MB, 4.59 px mean /
+  2.92 px median / 92.4% within 10 px (degraded 5.19 px). Pixels of the
+  512 px view (wolf 1.63 m tall over ~290 px: 1 px = 5.6 mm).
+- The exam, `python/creature/exam.py --seeds 1,2,3 --frames 48 --video`
+  (both creatures, 2 min 47 s): wolf mean joint error 24.9 / 20.6 /
+  21.5 mm (mean 22.3 mm = 1.4% of height), inner-bone rotation 8.2 /
+  8.2 / 9.0 deg, max 95 / 146 / 75 mm (front paws and lower front legs,
+  the near/far leg pair), foot slide 18-21 mm per still frame (0-1
+  plants found: the exam motion keeps the legs swaying); golem 16.3 /
+  15.0 / 15.5 mm (mean 15.6 mm = 1.1% of height), 7.9 / 8.2 / 9.4 deg,
+  max 138 / 252 / 194 mm (one forearm/hand, bones 8-9), foot slide
+  10-16 mm, 1-2 plants. Views agree on every clip (median ray gap
+  0.83-0.93% wolf, 0.52-0.57% golem; motion ratio under 0.5); fit
+  residual 15-18 mm rms; mean detection confidence 0.93. Baseline:
+  `tests/fixtures/creature/exam_baseline.json` (`--check` fails a
+  creature whose mean_mm or mean_deg_inner grows >5%, floor 2 mm /
+  0.5 deg). Side-by-side videos (film over motionforge, front | side)
+  were made for every seed.
+- Deterministic half in `cargo test` (fixture biped, 27 bones):
+  perfect detections -> mean head error < 1 mm, residual < 1 mm; 2 px
+  noise + 5% dropped detections -> mean < 40 mm and byte-identical on
+  a second run; front view of one motion + side view of another ->
+  rejected (`motion_ratio` ~4 vs limit 0.5), `--force` solves anyway.
+  CLI goldens: `creature_profile`, `creature_poses`, `creature_motion`,
+  `creature_project`, `creature_solve` (+ GLB), `creature_compare`.
+- Blender: `test_headless.py` "creature_solve finishes", the animated
+  rig GLB imports with its action (3 objects), missing inputs cancel.
+- Video step (free, Wan 2.2 TI2V-5B, Apache-2.0): see the line below.
+
 ## Pending owner gates (not runnable here)
 
 - P1: a Mixamo clip plays on the biped_hero rig in the Bevy game with no

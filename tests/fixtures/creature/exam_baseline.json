@@ -1,0 +1,28 @@
+{
+  "format": "motionforge-exam-baseline",
+  "version": 1,
+  "frames": 48,
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "creatures": {
+    "quad_wolf": {
+      "mean_mm": 22.333,
+      "max_mm": 105.537,
+      "mean_deg": 9.37,
+      "mean_deg_inner": 8.485,
+      "max_deg": 37.934,
+      "foot_slide_mm": 18.997
+    },
+    "biped_golem": {
+      "mean_mm": 15.587,
+      "max_mm": 194.653,
+      "mean_deg": 9.343,
+      "mean_deg_inner": 8.495,
+      "max_deg": 35.664,
+      "foot_slide_mm": 12.783
+    }
+  }
+}
