@@ -1,0 +1,4 @@
+=== motionforge creature-poses ===
+samples: 4 (frames 3k, 3k+1, 3k+2 = before, pose, after; render 3k+1 with a one-frame shutter)
+fast ratio: 0.50, seed: 5
+output: <OUT>

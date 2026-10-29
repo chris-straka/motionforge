@@ -7,6 +7,7 @@ pub mod animate;
 pub mod autopose;
 pub mod clip;
 pub mod contact;
+pub mod creature;
 pub mod detmath;
 pub mod fixture;
 pub mod footpin;

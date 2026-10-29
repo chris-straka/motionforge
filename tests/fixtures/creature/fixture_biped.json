@@ -1,0 +1,218 @@
+{
+  "format": "motionforge-creature",
+  "version": 1,
+  "name": "fixture_biped",
+  "height": 1.6713048922643066,
+  "ground": -0.011304949484765514,
+  "forward": [0, -1, 0],
+  "feet": ["mixamorig:LeftToeBase", "mixamorig:RightToeBase"],
+  "bones": [
+    {
+      "name": "Root",
+      "parent": null,
+      "head": [0, 0, 0],
+      "tail": [0, 0, 0.95],
+      "max_angle_deg": 20
+    },
+    {
+      "name": "mixamorig:Hips",
+      "parent": "Root",
+      "head": [0, 0, 0.95],
+      "tail": [0, 0, 0.966713048922643],
+      "max_angle_deg": 25
+    },
+    {
+      "name": "mixamorig:Spine",
+      "parent": "mixamorig:Hips",
+      "head": [0, 0, 1.05],
+      "tail": [0, 0, 1.2],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:Spine1",
+      "parent": "mixamorig:Spine",
+      "head": [0, 0, 1.2],
+      "tail": [0, 0, 1.35],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:Spine2",
+      "parent": "mixamorig:Spine1",
+      "head": [0, 0, 1.35],
+      "tail": [0, 0, 1.4666666666666668],
+      "max_angle_deg": 25
+    },
+    {
+      "name": "mixamorig:Neck",
+      "parent": "mixamorig:Spine2",
+      "head": [0, 0, 1.5],
+      "tail": [0, 0, 1.6],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:Head",
+      "parent": "mixamorig:Neck",
+      "head": [0, 0, 1.6],
+      "tail": [0, 0, 1.6500000000000001],
+      "max_angle_deg": 30
+    },
+    {
+      "name": "mixamorig:LeftShoulder",
+      "parent": "mixamorig:Spine2",
+      "head": [0.04, 0, 1.45],
+      "tail": [0.17, 0, 1.45],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:LeftArm",
+      "parent": "mixamorig:LeftShoulder",
+      "head": [0.17, 0, 1.45],
+      "tail": [0.43000000000000005, 0, 1.45],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:LeftForeArm",
+      "parent": "mixamorig:LeftArm",
+      "head": [0.43000000000000005, 0, 1.45],
+      "tail": [0.6800000000000002, 0, 1.45],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:LeftHand",
+      "parent": "mixamorig:LeftForeArm",
+      "head": [0.6800000000000002, 0, 1.45],
+      "tail": [0.7800000000000001, -0.01, 1.45],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:LeftHandMiddle1",
+      "parent": "mixamorig:LeftHand",
+      "head": [0.7600000000000001, 0, 1.45],
+      "tail": [0.8, 0, 1.45],
+      "max_angle_deg": 30
+    },
+    {
+      "name": "mixamorig:LeftHandPinky4",
+      "parent": "mixamorig:LeftHand",
+      "head": [0.8000000000000002, -0.02, 1.45],
+      "tail": [0.8600000000000001, -0.03, 1.45],
+      "max_angle_deg": 30
+    },
+    {
+      "name": "mixamorig:RightShoulder",
+      "parent": "mixamorig:Spine2",
+      "head": [-0.04, 0, 1.45],
+      "tail": [-0.17, 0, 1.45],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:RightArm",
+      "parent": "mixamorig:RightShoulder",
+      "head": [-0.17, 0, 1.45],
+      "tail": [-0.43000000000000005, 0, 1.45],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:RightForeArm",
+      "parent": "mixamorig:RightArm",
+      "head": [-0.43000000000000005, 0, 1.45],
+      "tail": [-0.6800000000000002, 0, 1.45],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:RightHand",
+      "parent": "mixamorig:RightForeArm",
+      "head": [-0.6800000000000002, 0, 1.45],
+      "tail": [-0.7800000000000001, -0.01, 1.45],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:RightHandMiddle1",
+      "parent": "mixamorig:RightHand",
+      "head": [-0.7600000000000001, 0, 1.45],
+      "tail": [-0.8, 0, 1.45],
+      "max_angle_deg": 30
+    },
+    {
+      "name": "mixamorig:RightHandPinky4",
+      "parent": "mixamorig:RightHand",
+      "head": [-0.8000000000000002, -0.02, 1.45],
+      "tail": [-0.8600000000000001, -0.03, 1.45],
+      "max_angle_deg": 30
+    },
+    {
+      "name": "mixamorig:LeftUpLeg",
+      "parent": "mixamorig:Hips",
+      "head": [0.09, 0, 0.92],
+      "tail": [0.09, 0, 0.5],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:LeftLeg",
+      "parent": "mixamorig:LeftUpLeg",
+      "head": [0.09, 0, 0.5],
+      "tail": [0.09, 0, 0.08000000000000002],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:LeftFoot",
+      "parent": "mixamorig:LeftLeg",
+      "head": [0.09, 0, 0.08000000000000002],
+      "tail": [0.09, -0.12, 0.020000000000000018],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:LeftToeBase",
+      "parent": "mixamorig:LeftFoot",
+      "head": [0.09, -0.12, 0.020000000000000018],
+      "tail": [0.09, -0.18, -0.009999999999999985],
+      "max_angle_deg": 30
+    },
+    {
+      "name": "mixamorig:RightUpLeg",
+      "parent": "mixamorig:Hips",
+      "head": [-0.09, 0, 0.92],
+      "tail": [-0.09, 0, 0.5],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:RightLeg",
+      "parent": "mixamorig:RightUpLeg",
+      "head": [-0.09, 0, 0.5],
+      "tail": [-0.09, 0, 0.08000000000000002],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:RightFoot",
+      "parent": "mixamorig:RightLeg",
+      "head": [-0.09, 0, 0.08000000000000002],
+      "tail": [-0.09, -0.12, 0.020000000000000018],
+      "max_angle_deg": 40
+    },
+    {
+      "name": "mixamorig:RightToeBase",
+      "parent": "mixamorig:RightFoot",
+      "head": [-0.09, -0.12, 0.020000000000000018],
+      "tail": [-0.09, -0.18, -0.009999999999999985],
+      "max_angle_deg": 30
+    }
+  ],
+  "views": [
+    {
+      "name": "front",
+      "position": [0, -5.698192135247725, 0.8243474966473878],
+      "look_at": [0, -0.06000000186264515, 0.8243474966473878],
+      "fov_y_deg": 35,
+      "width": 512,
+      "height": 512
+    },
+    {
+      "name": "side",
+      "position": [-5.63819213338508, -0.06000000186264515, 0.8243474966473878],
+      "look_at": [0, -0.06000000186264515, 0.8243474966473878],
+      "fov_y_deg": 35,
+      "width": 512,
+      "height": 512
+    }
+  ]
+}

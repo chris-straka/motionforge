@@ -296,3 +296,229 @@ fn contract_help_and_errors() {
     assert_eq!(code, 2);
     assert!(stderr.contains("cannot read"));
 }
+
+// --- creature motion ------------------------------------------------------
+
+fn creature_fixture() -> String {
+    fixture("creature/fixture_biped.json")
+}
+
+#[test]
+fn contract_creature_profile() {
+    let dir = workdir("creature_profile");
+    let glb = dir.join("fixture.glb").to_str().unwrap().to_string();
+    let (code, _, _) = run(&["fixture-glb".into(), "--output".into(), glb.clone()]);
+    assert_eq!(code, 0);
+    let out = dir.join("creature.json").to_str().unwrap().to_string();
+    let clean = dir.join("clean.glb").to_str().unwrap().to_string();
+    let report = dir.join("report.json").to_str().unwrap().to_string();
+    check(
+        "creature_profile",
+        &[
+            "creature-profile".into(),
+            "--rig".into(),
+            glb,
+            "--output".into(),
+            out.clone(),
+            "--clean-glb".into(),
+            clean.clone(),
+            "--report".into(),
+            report.clone(),
+            "--name".into(),
+            "fixture_biped".into(),
+        ],
+        &[&out, &clean, &report],
+    );
+    // The committed profile is what this command produces.
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        std::fs::read_to_string(creature_fixture()).unwrap(),
+        "tests/fixtures/creature/fixture_biped.json drifted from creature-profile"
+    );
+}
+
+#[test]
+fn contract_creature_poses() {
+    let dir = workdir("creature_poses");
+    let out = dir.join("poses.json").to_str().unwrap().to_string();
+    check(
+        "creature_poses",
+        &[
+            "creature-poses".into(),
+            "--creature".into(),
+            creature_fixture(),
+            "--output".into(),
+            out.clone(),
+            "--count".into(),
+            "4".into(),
+            "--seed".into(),
+            "5".into(),
+        ],
+        &[&out],
+    );
+}
+
+#[test]
+fn contract_creature_exam_chain() {
+    // motion -> project (noisy) -> solve (+ GLB) -> compare, each pinned.
+    let dir = workdir("creature_exam");
+    let truth = dir.join("truth.json").to_str().unwrap().to_string();
+    check(
+        "creature_motion",
+        &[
+            "creature-motion".into(),
+            "--creature".into(),
+            creature_fixture(),
+            "--output".into(),
+            truth.clone(),
+            "--frames".into(),
+            "16".into(),
+            "--seed".into(),
+            "3".into(),
+        ],
+        &[&truth],
+    );
+    let det = dir.join("det.json").to_str().unwrap().to_string();
+    check(
+        "creature_project",
+        &[
+            "creature-project".into(),
+            "--creature".into(),
+            creature_fixture(),
+            "--input".into(),
+            truth.clone(),
+            "--output".into(),
+            det.clone(),
+            "--noise-px".into(),
+            "1.5".into(),
+            "--drop".into(),
+            "0.05".into(),
+            "--seed".into(),
+            "2".into(),
+        ],
+        &[&det],
+    );
+    let glb = dir.join("fixture.glb").to_str().unwrap().to_string();
+    let (code, _, _) = run(&["fixture-glb".into(), "--output".into(), glb.clone()]);
+    assert_eq!(code, 0);
+    let solved = dir.join("solved.json").to_str().unwrap().to_string();
+    let anim = dir.join("solved.glb").to_str().unwrap().to_string();
+    let report = dir.join("solve.json").to_str().unwrap().to_string();
+    check(
+        "creature_solve",
+        &[
+            "creature-solve".into(),
+            "--creature".into(),
+            creature_fixture(),
+            "--detections".into(),
+            det,
+            "--output".into(),
+            solved.clone(),
+            "--glb-in".into(),
+            glb,
+            "--glb-out".into(),
+            anim.clone(),
+            "--clip-name".into(),
+            "exam".into(),
+            "--report".into(),
+            report.clone(),
+        ],
+        &[&solved, &anim, &report],
+    );
+    let scores = dir.join("scores.json").to_str().unwrap().to_string();
+    check(
+        "creature_compare",
+        &[
+            "creature-compare".into(),
+            "--creature".into(),
+            creature_fixture(),
+            "--truth".into(),
+            truth,
+            "--solved".into(),
+            solved,
+            "--output".into(),
+            scores.clone(),
+        ],
+        &[&scores],
+    );
+}
+
+#[test]
+fn creature_solve_rejects_two_different_moves() {
+    let dir = workdir("creature_reject");
+    let mk = |seed: &str, name: &str| {
+        let clip = dir
+            .join(format!("{}.json", name))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let (code, _, _) = run(&[
+            "creature-motion".into(),
+            "--creature".into(),
+            creature_fixture(),
+            "--output".into(),
+            clip.clone(),
+            "--frames".into(),
+            "24".into(),
+            "--seed".into(),
+            seed.into(),
+        ]);
+        assert_eq!(code, 0);
+        let det = dir
+            .join(format!("{}.det.json", name))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let (code, _, _) = run(&[
+            "creature-project".into(),
+            "--creature".into(),
+            creature_fixture(),
+            "--input".into(),
+            clip,
+            "--output".into(),
+            det.clone(),
+        ]);
+        assert_eq!(code, 0);
+        std::fs::read_to_string(det).unwrap()
+    };
+    let a = mk("1", "a");
+    let b = mk("2", "b");
+    // Splice: front view from a, side view from b (one frame per line).
+    let mut mixed = String::new();
+    for (la, lb) in a.lines().zip(b.lines()) {
+        if la.starts_with("[[") {
+            let front = &la[1..la.find("]],").unwrap() + 2];
+            let side_start = lb.find("]],").unwrap() + 3;
+            let side = &lb[side_start..];
+            mixed.push_str(&format!("[{},{}", front, side));
+        } else {
+            mixed.push_str(la);
+        }
+        mixed.push('\n');
+    }
+    let det = dir.join("mixed.json").to_str().unwrap().to_string();
+    std::fs::write(&det, mixed).unwrap();
+    let out = dir.join("out.json").to_str().unwrap().to_string();
+    let (code, _, stderr) = run(&[
+        "creature-solve".into(),
+        "--creature".into(),
+        creature_fixture(),
+        "--detections".into(),
+        det.clone(),
+        "--output".into(),
+        out.clone(),
+    ]);
+    assert_eq!(code, 3, "stderr: {}", stderr);
+    assert!(stderr.contains("do not show the same move"), "{}", stderr);
+    let (code, _, _) = run(&[
+        "creature-solve".into(),
+        "--creature".into(),
+        creature_fixture(),
+        "--detections".into(),
+        det,
+        "--output".into(),
+        out,
+        "--force".into(),
+    ]);
+    assert_eq!(code, 0);
+}

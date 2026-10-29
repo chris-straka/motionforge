@@ -6,6 +6,8 @@ models/
 *.blend
 *.blend1
 *.glb
+# Procedural CLI goldens (built from fixture-glb, no game assets)
+!tests/fixtures/golden/*.glb
 *.ckpt
 *.safetensors
 *.onnx

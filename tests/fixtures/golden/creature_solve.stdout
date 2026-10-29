@@ -1,0 +1,8 @@
+=== motionforge creature-solve ===
+frames: 16 at 24 fps; joints seen: 27 of 27
+views agree: yes (median ray gap 0.57% of height, motion ratio 0.083)
+fit residual: 10.0 mm rms; limited bone-frames: 14
+feet: 0 plants, max pin shift 0.0 mm
+glb: <OUT> (animation "exam")
+report: <OUT>
+output: <OUT>

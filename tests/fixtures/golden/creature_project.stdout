@@ -1,0 +1,3 @@
+=== motionforge creature-project ===
+frames: 16, views: front, side, joints: 27, noise 1.50 px, drop 0.05, seed 2
+output: <OUT>

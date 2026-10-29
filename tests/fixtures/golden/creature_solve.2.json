@@ -1,0 +1,12 @@
+{
+  "frames": 16,
+  "joints_seen": 27,
+  "joints_total": 27,
+  "median_gap_ratio": 0.0057,
+  "motion_ratio": 0.0832,
+  "consistent": true,
+  "residual_mm": 9.98,
+  "limited": 14,
+  "plants": 0,
+  "max_pin_shift_mm": 0
+}

@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::time::Instant;
 
+mod creature_cmds;
 mod glb_cmds;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -39,6 +40,12 @@ commands:\n\
   pose-test      range-of-motion poses as animations (+ rendered sheet)\n\
   fixture-glb    procedural skinned test humanoid GLB\n\
   adapter        genforge character-chain adapter (adapter --help)\n\
+  creature-profile  rigged creature GLB -> creature profile (skeleton, limits, feet, cameras)\n\
+  creature-poses    random training poses within the limits\n\
+  creature-motion   random smooth exam motion within the limits\n\
+  creature-project  synthetic two-view detections from a clip\n\
+  creature-solve    two-view detections -> clip (+ GLB animation)\n\
+  creature-compare  score a solved clip against its truth, bone by bone\n\
 \n\
 retarget flags:\n\
   --source <clip> --target <skeleton|clip> --map <bonemap> --output <clip>\n\
@@ -97,6 +104,28 @@ pose-test flags:\n\
 fixture-glb flags:\n\
   --output <glb> [--naming mixamo|plain|def] [--twisted] [--walk]\n\
 \n\
+creature-profile flags:\n\
+  --rig <glb> --output <creature> [--clean-glb <glb>] [--forward auto|+x|-x|+y|-y]\n\
+  [--name <n>] [--view-size <px>] [--report <json>]\n\
+\n\
+creature-poses flags:\n\
+  --creature <creature> --output <clip> [--count 3000] [--seed 1] [--fast-ratio 0.5]\n\
+\n\
+creature-motion flags:\n\
+  --creature <creature> --output <clip> [--frames 48] [--fps 24] [--seed 1] [--amplitude 0.8]\n\
+\n\
+creature-project flags:\n\
+  --creature <creature> --input <clip> --output <detections> [--noise-px 0] [--drop 0] [--seed 1]\n\
+\n\
+creature-solve flags:\n\
+  --creature <creature> --detections <detections> --output <clip>\n\
+  [--glb-in <rig glb> --glb-out <glb> [--clip-name <name>]] [--no-pin] [--force]\n\
+  [--smooth-sigma 1] [--quat-sigma 0.8] [--max-gap-ratio 0.08] [--max-motion-ratio 0.5]\n\
+  [--min-conf 0.2] [--report <json>]\n\
+\n\
+creature-compare flags:\n\
+  --creature <creature> --truth <clip> --solved <clip> [--output <json>]\n\
+\n\
 global: --help/-h, --version/-v, --time (wall ms on stderr)\n";
 
 fn help_text() -> String {
@@ -140,6 +169,7 @@ fn is_bool_flag(key: &str) -> bool {
             | "twisted"
             | "no-contact"
             | "walk"
+            | "force"
             | "time"
             | "help"
             | "h"
@@ -629,6 +659,12 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "grip" => glb_cmds::cmd_grip(&args),
             "pose-test" => glb_cmds::cmd_pose_test(&args),
             "fixture-glb" => glb_cmds::cmd_fixture_glb(&args),
+            "creature-profile" => creature_cmds::cmd_profile(&args),
+            "creature-poses" => creature_cmds::cmd_poses(&args),
+            "creature-motion" => creature_cmds::cmd_motion(&args),
+            "creature-project" => creature_cmds::cmd_project(&args),
+            "creature-solve" => creature_cmds::cmd_solve(&args),
+            "creature-compare" => creature_cmds::cmd_compare(&args),
             other => Err((1, format!("unknown command '{}'; try --help", other))),
         },
         Err(e) => Err(e),

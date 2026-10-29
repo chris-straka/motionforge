@@ -1,0 +1,33 @@
+=== motionforge creature-compare ===
+frames compared: 16
+bone rotation error: mean 12.40 deg (11.15 deg over bones with children), max 63.69 deg
+joint position error: mean 11.7 mm, max 54.1 mm
+foot slide: 24.2 mm per still frame (21 still foot-frames)
+  Root: 3.32 deg (max 5.96), 6.0 mm (max 13.0)
+  mixamorig:Hips: 4.02 deg (max 7.85), 7.2 mm (max 21.6)
+  mixamorig:Spine: 10.50 deg (max 13.78), 8.8 mm (max 26.0)
+  mixamorig:Spine1: 9.60 deg (max 22.80), 8.9 mm (max 19.4)
+  mixamorig:Spine2: 9.11 deg (max 14.75), 8.6 mm (max 30.9)
+  mixamorig:Neck: 15.44 deg (max 30.00), 13.0 mm (max 34.8)
+  mixamorig:Head: 16.86 deg (max 30.77), 13.7 mm (max 48.3)
+  mixamorig:LeftShoulder: 12.89 deg (max 21.88), 12.4 mm (max 31.4)
+  mixamorig:LeftArm: 13.75 deg (max 24.68), 9.7 mm (max 23.7)
+  mixamorig:LeftForeArm: 13.90 deg (max 25.60), 14.5 mm (max 38.9)
+  mixamorig:LeftHand: 18.26 deg (max 51.55), 15.3 mm (max 40.1)
+  mixamorig:LeftHandMiddle1: 21.11 deg (max 63.69), 20.6 mm (max 53.4)
+  mixamorig:LeftHandPinky4: 24.23 deg (max 60.29), 20.5 mm (max 54.1)
+  mixamorig:RightShoulder: 10.55 deg (max 15.73), 12.9 mm (max 35.6)
+  mixamorig:RightArm: 21.18 deg (max 33.51), 12.7 mm (max 32.7)
+  mixamorig:RightForeArm: 27.43 deg (max 44.14), 13.3 mm (max 40.6)
+  mixamorig:RightHand: 13.54 deg (max 39.09), 15.2 mm (max 31.9)
+  mixamorig:RightHandMiddle1: 16.91 deg (max 40.13), 13.6 mm (max 29.3)
+  mixamorig:RightHandPinky4: 18.24 deg (max 40.34), 13.7 mm (max 27.4)
+  mixamorig:LeftUpLeg: 5.32 deg (max 8.12), 9.3 mm (max 24.7)
+  mixamorig:LeftLeg: 7.88 deg (max 12.27), 10.6 mm (max 19.1)
+  mixamorig:LeftFoot: 5.70 deg (max 9.80), 10.8 mm (max 17.1)
+  mixamorig:LeftToeBase: 6.38 deg (max 12.24), 11.2 mm (max 19.0)
+  mixamorig:RightUpLeg: 4.96 deg (max 6.78), 7.7 mm (max 22.0)
+  mixamorig:RightLeg: 8.84 deg (max 16.36), 7.2 mm (max 16.8)
+  mixamorig:RightFoot: 6.73 deg (max 8.66), 9.6 mm (max 24.6)
+  mixamorig:RightToeBase: 8.07 deg (max 12.48), 9.4 mm (max 19.2)
+output: <OUT>
