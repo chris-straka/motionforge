@@ -13,8 +13,10 @@
 //! The mapper understands Rigify `DEF-*`, Mixamo (`mixamorig:` prefix
 //! or bare, which is also Tripo's `spec: mixamo`), Unreal-style
 //! (`upperarm_l`, `calf_r`, `spine_01`) and plain names (`UpperArm_L`,
-//! `Thigh.R`, `Clavicle_L`). The spine between hips and neck is mapped
-//! by position in the chain, not by name.
+//! `Thigh.R`, `Clavicle_L`) and NVIDIA's SOMA skeleton (Kimodo, BONES-SEED:
+//! `LeftLeg` is the thigh there, `LeftShin` the shin, where Mixamo's
+//! `LeftLeg` is the shin). The spine between hips and neck is mapped by
+//! position in the chain, not by name.
 
 use crate::rig::Rig;
 
@@ -309,14 +311,27 @@ pub fn map_rig(rig: &Rig) -> Mapping {
             take(j, rig.names[j].clone(), &mut assigned);
         }
     }
-    // 2. Aliases for sided bones, hips, neck and head.
+    // 2. Aliases for sided bones, hips, neck and head. A side that has
+    // both a "Leg" and a "Shin" is SOMA's: its Leg is the thigh.
+    let has_base = |want: &str, on: Side| {
+        joints.iter().any(|&j| {
+            let (b, s) = split_side(&rig.names[j]);
+            s == Some(on) && squash(&b) == want
+        })
+    };
+    let soma_legs = |on: Side| has_base("leg", on) && has_base("shin", on);
     let mut neck_candidates = Vec::new();
     for &j in &joints {
         let (base, side) = split_side(&rig.names[j]);
         let base = squash(&base);
         match side {
             Some(side) => {
-                if let Some(b) = sided_base(&base) {
+                let alias = if base == "leg" && soma_legs(side) {
+                    Some("thigh".to_string())
+                } else {
+                    sided_base(&base)
+                };
+                if let Some(b) = alias {
                     let suffix = if side == Side::L { "L" } else { "R" };
                     take(j, format!("DEF-{}.{}", b, suffix), &mut assigned);
                 }
@@ -457,6 +472,109 @@ mod tests {
             Some("toe".into())
         );
         assert_eq!(sided_base(&squash(&split_side("Finger1_L").0)), None);
+    }
+
+    /// A one-skin rig of `names` (rest transforms don't matter to names).
+    fn rig_of(names: &[&str], parent: &[Option<usize>]) -> Rig {
+        use crate::glb::Affine;
+        use crate::math::{Quat, Vec3};
+        use crate::rig::Trs;
+        let n = names.len();
+        let mut children = vec![Vec::new(); n];
+        for (i, p) in parent.iter().enumerate() {
+            if let Some(p) = p {
+                children[*p].push(i);
+            }
+        }
+        let rest = Trs {
+            t: Vec3::ZERO,
+            r: Quat::IDENTITY,
+            s: Vec3::new(1.0, 1.0, 1.0),
+        };
+        Rig {
+            names: names.iter().map(|s| s.to_string()).collect(),
+            parent: parent.to_vec(),
+            children,
+            rest: vec![rest; n],
+            rest_local: vec![Affine::IDENTITY; n],
+            rest_world: vec![Affine::IDENTITY; n],
+            skins: vec![(0..n).collect()],
+            order: (0..n).collect(),
+        }
+    }
+
+    /// SOMA (Kimodo, BONES-SEED): `LeftLeg` is the thigh and `LeftShin`
+    /// the shin; Mixamo's `LeftLeg` stays the shin.
+    #[test]
+    fn soma_leg_is_the_thigh() {
+        let names = [
+            "Hips",
+            "Spine1",
+            "Spine2",
+            "Chest",
+            "Neck1",
+            "Neck2",
+            "Head",
+            "LeftShoulder",
+            "LeftArm",
+            "LeftForeArm",
+            "LeftHand",
+            "RightShoulder",
+            "RightArm",
+            "RightForeArm",
+            "RightHand",
+            "LeftLeg",
+            "LeftShin",
+            "LeftFoot",
+            "LeftToeBase",
+            "RightLeg",
+            "RightShin",
+            "RightFoot",
+            "RightToeBase",
+        ];
+        let parents = [
+            None,
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(5),
+            Some(3),
+            Some(7),
+            Some(8),
+            Some(9),
+            Some(3),
+            Some(11),
+            Some(12),
+            Some(13),
+            Some(0),
+            Some(15),
+            Some(16),
+            Some(17),
+            Some(0),
+            Some(19),
+            Some(20),
+            Some(21),
+        ];
+        let rig = rig_of(&names, &parents);
+        let map = map_rig(&rig);
+        let of = |n: &str| map.canonical_of(names.iter().position(|x| *x == n).unwrap());
+        assert_eq!(of("LeftLeg"), Some("DEF-thigh.L"));
+        assert_eq!(of("LeftShin"), Some("DEF-shin.L"));
+        assert_eq!(of("RightLeg"), Some("DEF-thigh.R"));
+        assert_eq!(of("RightShin"), Some("DEF-shin.R"));
+        assert_eq!(of("Chest"), Some("DEF-spine.003"));
+        assert_eq!(of("Neck1"), Some("DEF-spine.004"));
+        assert_eq!(of("Head"), Some("DEF-spine.006"));
+        assert!(map.missing.is_empty(), "{:?}", map.missing);
+        assert!(map.duplicates.is_empty());
+
+        let mixamo = ["Hips", "LeftUpLeg", "LeftLeg", "LeftFoot"];
+        let rig = rig_of(&mixamo, &[None, Some(0), Some(1), Some(2)]);
+        let map = map_rig(&rig);
+        assert_eq!(map.canonical_of(1), Some("DEF-thigh.L"));
+        assert_eq!(map.canonical_of(2), Some("DEF-shin.L"));
     }
 
     #[test]

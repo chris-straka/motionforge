@@ -69,7 +69,10 @@ rerig is the `repair-rig` adapter).
    aliases with side detection: Mixamo (`mixamorig:LeftArm`, also what
    Tripo returns for `spec: mixamo`, which genforge requests for
    humanoids), Unreal-style (`upperarm_l`, `calf_r`, `index_01_l`),
-   plain (`UpperArm_L`, `Clavicle_R`, `Thigh.L`). The spine between hips
+   plain (`UpperArm_L`, `Clavicle_R`, `Thigh.L`), and NVIDIA's SOMA
+   skeleton (Kimodo, BONES-SEED): a side with both a `Leg` and a `Shin`
+   is SOMA's, so its `LeftLeg` is the thigh, where Mixamo's `LeftLeg` is
+   the shin (test `soma_leg_is_the_thigh`). The spine between hips
    and neck maps by position (1 bone -> `.001`; 2 -> `.001`, `.003`; 3+ ->
    first two and the last). Hips fall back to the thighs' parent.
 2. Missing core bones: `ok: false` with the list. No skin: `ok: false`.
