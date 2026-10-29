@@ -9,6 +9,7 @@
 import json
 import math
 import os
+import shutil
 import sys
 
 import bpy
@@ -379,6 +380,46 @@ def main():
             check("FINISHED" in result, "autopose finishes with root-relative weights")
         finally:
             os.unlink(weights_path)
+
+        # --- creature motion (two-view solve -> animated rig GLB) ----------
+        import subprocess
+        import tempfile
+        repo = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+        profile = os.path.join(repo, "tests", "fixtures", "creature", "fixture_biped.json")
+        cdir = tempfile.mkdtemp(prefix="motionforge_creature_")
+        try:
+            glb = os.path.join(cdir, "fixture.glb")
+            truth = os.path.join(cdir, "truth.json")
+            det = os.path.join(cdir, "det.json")
+            for argv in (
+                ["fixture-glb", "--output", glb],
+                ["creature-motion", "--creature", profile, "--output", truth, "--frames", "12", "--seed", "3"],
+                ["creature-project", "--creature", profile, "--input", truth, "--output", det, "--noise-px", "1"],
+            ):
+                subprocess.run([binary] + argv, check=True, capture_output=True)
+            if bpy.context.mode != "OBJECT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            clean_scene()
+            params = scene.motionforge_params
+            params.creature_profile = profile
+            params.creature_detections = det
+            params.creature_glb = glb
+            before = set(bpy.data.objects)
+            result = bpy.ops.motionforge.creature_solve()
+            check("FINISHED" in result, "creature_solve finishes")
+            new_arms = [o for o in bpy.data.objects if o not in before and o.type == "ARMATURE"]
+            check(len(new_arms) == 1, f"creature solve imported one armature ({len(new_arms)})")
+            if new_arms:
+                arm = new_arms[0]
+                check(arm.animation_data is not None and arm.animation_data.action is not None,
+                      "imported creature armature carries the solved action")
+                check(bpy.context.scene.frame_end >= 1, "scene has frames")
+            check("creature-solve" in params.last_report, "creature report stored")
+            params.creature_glb = ""
+            params.creature_detections = ""
+            check_cancel("creature_solve without detections", lambda: bpy.ops.motionforge.creature_solve())
+        finally:
+            shutil.rmtree(cdir, ignore_errors=True)
 
         # --- negative paths ---------------------------------------------
         bpy.ops.object.mode_set(mode="OBJECT")

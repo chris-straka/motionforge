@@ -265,6 +265,29 @@ class MOTIONFORGE_PG_params(bpy.types.PropertyGroup):
         subtype="FILE_PATH",
     )
 
+    creature_profile: StringProperty(
+        name="Creature",
+        description="Creature profile JSON (motionforge creature-profile)",
+        default="",
+        subtype="FILE_PATH",
+    )
+    creature_detections: StringProperty(
+        name="Detections",
+        description="Two-view joint detections JSON (python/creature/detect.py)",
+        default="",
+        subtype="FILE_PATH",
+    )
+    creature_glb: StringProperty(
+        name="Rig GLB",
+        description="The creature's cleaned rig GLB; when set, the solve is imported as that GLB with the animation (the game file)",
+        default="",
+        subtype="FILE_PATH",
+    )
+    creature_pin: BoolProperty(
+        name="Plant Feet", default=True,
+        description="Pin planted feet so they do not slide",
+    )
+
     last_report: StringProperty(
         name="Last Report",
         description="Most recent CLI report",
@@ -588,6 +611,61 @@ class MOTIONFORGE_OT_autopose(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class MOTIONFORGE_OT_creature_solve(bpy.types.Operator):
+    bl_idname = "motionforge.creature_solve"
+    bl_label = "Solve Creature Motion"
+    bl_description = (
+        "Two-view joint detections -> animation on the creature's skeleton "
+        "(imports the animated rig GLB, or an action on the active armature)"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        try:
+            return self._run(context)
+        except (clip_io.MotionforgeError, cli.CliError) as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+
+    def _run(self, context):
+        params = _params(context)
+        creature = bpy.path.abspath(params.creature_profile)
+        detections = bpy.path.abspath(params.creature_detections)
+        glb = bpy.path.abspath(params.creature_glb) if params.creature_glb else ""
+        for label, path in (("creature profile", creature), ("detections", detections)):
+            if not path or not os.path.isfile(path):
+                raise clip_io.MotionforgeError(f"pick a {label} file in the panel first")
+        if glb and not os.path.isfile(glb):
+            raise clip_io.MotionforgeError("the rig GLB path is not a file")
+        arm = None if glb else _active_armature(context)
+        args = cli.build_creature_solve_args(
+            creature, detections, "{tmp}/solved.json",
+            glb_in=glb, glb_out="{tmp}/solved.glb" if glb else "", pin=params.creature_pin,
+        )
+        result = {}
+
+        def do_import(tmpdir, report):
+            if glb:
+                before = set(bpy.data.objects)
+                bpy.ops.import_scene.gltf(filepath=os.path.join(tmpdir, "solved.glb"))
+                new = [o for o in bpy.data.objects if o not in before]
+                arms = [o for o in new if o.type == "ARMATURE"]
+                result["objects"] = len(new)
+                if arms:
+                    context.view_layer.objects.active = arms[0]
+            else:
+                clip = _read_json(os.path.join(tmpdir, "solved.json"))
+                action = clip_io.import_clip(arm, clip, "CreatureSolve", context.scene.frame_start)
+                result["action"] = action.name
+
+        _run_feature(context, {}, args, do_import)
+        if glb:
+            self.report({"INFO"}, f"imported the animated creature GLB ({result.get('objects', 0)} objects)")
+        else:
+            self.report({"INFO"}, f"action '{result.get('action')}' on '{arm.name}'")
+        return {"FINISHED"}
+
+
 class MOTIONFORGE_OT_export_godot(bpy.types.Operator):
     bl_idname = "motionforge.export_godot"
     bl_label = "Export Game GLB"
@@ -669,6 +747,14 @@ class MOTIONFORGE_PT_panel(bpy.types.Panel):
         box.label(text="Move 1-6 joints, select them, run:")
         box.operator("motionforge.autopose", icon="PLAY")
 
+        box = layout.box()
+        box.label(text="Creature Motion", icon="MONKEY")
+        box.prop(params, "creature_profile")
+        box.prop(params, "creature_detections")
+        box.prop(params, "creature_glb")
+        box.prop(params, "creature_pin")
+        box.operator("motionforge.creature_solve", icon="PLAY")
+
         report = params.last_report.strip()
         if report:
             box = layout.box()
@@ -686,6 +772,7 @@ _CLASSES = (
     MOTIONFORGE_OT_physics_fix,
     MOTIONFORGE_OT_physics_overlay,
     MOTIONFORGE_OT_autopose,
+    MOTIONFORGE_OT_creature_solve,
     MOTIONFORGE_OT_export_godot,
     MOTIONFORGE_PT_panel,
 )

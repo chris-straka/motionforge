@@ -158,3 +158,13 @@ def parse_feet(text):
     if not names:
         raise ValueError("feet needs at least one bone name")
     return names
+
+
+def build_creature_solve_args(creature, detections, output, glb_in="", glb_out="", clip_name="creature", pin=True):
+    """argv for `motionforge creature-solve` (two-view detections -> clip, + GLB)."""
+    args = ["creature-solve", "--creature", creature, "--detections", detections, "--output", output]
+    if glb_in:
+        args += ["--glb-in", glb_in, "--glb-out", glb_out, "--clip-name", clip_name]
+    if not pin:
+        args.append("--no-pin")
+    return args
