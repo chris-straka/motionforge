@@ -5,8 +5,8 @@ symmetry: 18 of 18 side joints have a mirror
 joints left outside the body: 0
 forward: (0, -1, 0) [head over the centre; assumed glTF +Z (Blender -Y)]
 height: 1.671 m, ground z -0.011
-view front: at (0.00, -5.70, 0.82) looking at (0.00, -0.06, 0.82), fov 35 deg, 512x512
-view side: at (-5.64, -0.06, 0.82) looking at (0.00, -0.06, 0.82), fov 35 deg, 512x512
+view front: at (0.00, -4.57, 0.82) looking at (0.00, -0.06, 0.82), fov 35 deg, 512x512
+view side: at (-4.51, -0.06, 0.82) looking at (0.00, -0.06, 0.82), fov 35 deg, 512x512
 score: 1.5000
 report: <OUT>
 clean glb: <OUT>

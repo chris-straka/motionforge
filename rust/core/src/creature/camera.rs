@@ -180,7 +180,7 @@ pub fn default_views(centre: Vec3, radius: f64, forward: Vec3, size: usize) -> V
     let fov_y_deg: f64 = 35.0;
     let half = fov_y_deg.to_radians() * 0.5;
     let (s, c) = detmath::sin_cos(half);
-    let distance = 1.5 * radius / (s / c);
+    let distance = 1.2 * radius / (s / c);
     let fwd = Vec3::new(forward.x, forward.y, 0.0).normalized();
     let right = fwd.cross(Vec3::new(0.0, 0.0, 1.0)).normalized();
     let mk = |name: &str, dir: Vec3| View {
