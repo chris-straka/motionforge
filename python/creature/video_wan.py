@@ -66,7 +66,9 @@ def main():
     # 1. Text first, then free the 11 GB encoder.
     tok = AutoTokenizer.from_pretrained(MODEL, subfolder="tokenizer")
     enc = UMT5EncoderModel.from_pretrained(MODEL, subfolder="text_encoder", torch_dtype=torch.float16)
-    enc.enable_group_offload(onload_device=torch.device("cuda"), offload_device=torch.device("cpu"), offload_type="leaf_level", use_stream=True)
+    from diffusers.hooks import apply_group_offloading
+
+    apply_group_offloading(enc, onload_device=torch.device("cuda"), offload_device=torch.device("cpu"), offload_type="leaf_level", use_stream=True)
 
     def embed(text):
         ids = tok(text, padding="max_length", max_length=512, truncation=True, add_special_tokens=True, return_attention_mask=True, return_tensors="pt")
