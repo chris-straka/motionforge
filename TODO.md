@@ -27,6 +27,20 @@ numbers and commands in `docs/measurements.md`.
       prefers stylized on 3 test clips).
 - [ ] P1 gate: a Mixamo clip on `biped_hero` in the Bevy game with no foot slide.
 
+## Creature motion follow-ups (2026-10-29, `docs/creature.md`)
+
+- [ ] Real video through the pipeline: a paid clip (Seedance/Kling/
+      MiniMax, release batch) of the wolf start frame with the strict
+      prompt; measure the consistency check and the solve on it. The
+      detector has only seen Blender renders plus degradation.
+- [ ] Per-axis (swing/twist) joint limits (v2 limits format) so a knee
+      cannot bend sideways; today's caps are scalar.
+- [ ] Sideways-only disagreement between the two views is invisible to
+      the consistency check (orthogonal cameras share only the height);
+      a third camera or a learned prior would catch it.
+- [ ] Occlusion-aware training targets (ray-cast visibility per joint)
+      to feed `--min-conf`; today every joint is a target.
+
 ## Next code tasks (agent-ready)
 
 - [ ] Contact pass v2 (`docs/contact.md` limits): upper arm (armpit) and

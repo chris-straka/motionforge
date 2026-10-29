@@ -79,6 +79,36 @@ numbers: `docs/adapters.md`. Gate: fixture tests in every naming style,
 a real game rig through all three, and a genforge rehearsal run end to
 end (genforge `docs/phase-7.md`).
 
+## Creature motion (built 2026-10-29)
+
+AI video of our own creature in, an animation on its own skeleton out,
+for bodies with no mocap (four legs, wings, tails, rock people, a
+centaur): CanItCode's method, built here since his tool is unreleased.
+Spec, formats, limits and numbers: `docs/creature.md` and
+`docs/measurements.md` ("Creature motion").
+
+- Rust core `motion_core::creature` + CLI `creature-profile | -poses |
+  -motion | -project | -solve | -compare`: a creature profile from a
+  skintokens rig (rig checks pick the best of several tries), two fixed
+  known cameras, random poses within the joint limits, the exam motion,
+  two-view consistency check + triangulation + solve with limits,
+  smoothing and planted feet, bone-by-bone scoring, and the rig GLB
+  with the animation. Byte-deterministic, goldens pinned.
+- `python/creature/`: Blender renderer (training poses with motion
+  blur and random light; the exam film; the video model's start
+  frame), a per-creature DINOv2-small joint finder (Apache-2.0, trained
+  on f's 8 GB card), the detector, and the exam driver.
+- Gate: `python/creature/exam.py --check tests/fixtures/creature/exam_baseline.json`
+  for every change; a change that makes any creature's exam worse is
+  out. `cargo test` holds the deterministic half.
+- Video source: pluggable. Paid models (Seedance, Kling, MiniMax) wait
+  for the release batch; the free open-weights try (Wan 2.2 TI2V-5B,
+  Apache-2.0) is recorded in the measurements with its verdict.
+- Test creatures are free stand-ins (SDXL reference -> TripoSG, MIT;
+  never Hunyuan): a wolf (quadruped) and a rock golem (biped). Their
+  meshes, rigs, renders and weights stay out of the repo (`data/`,
+  `models/`); only the procedural fixture biped's profile is committed.
+
 ## Rules
 
 - No game assets or licensed mocap committed; manifests only.
