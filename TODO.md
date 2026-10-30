@@ -33,6 +33,9 @@ numbers and commands in `docs/measurements.md`.
       MiniMax, release batch) of the wolf start frame with the strict
       prompt; measure the consistency check and the solve on it. The
       detector has only seen Blender renders plus degradation.
+- [ ] Wan 2.2 TI2V-5B gave a clean but near-static clip at 20 steps /
+      guidance 5 (`video_wan.py`); try 40 steps, guidance 7-9, a prompt
+      that names a bigger move, or the 14B A14B model on a bigger card.
 - [ ] Per-axis (swing/twist) joint limits (v2 limits format) so a knee
       cannot bend sideways; today's caps are scalar.
 - [ ] Sideways-only disagreement between the two views is invisible to

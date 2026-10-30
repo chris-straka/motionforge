@@ -116,7 +116,9 @@ Numbers below are measured; the commands are in `docs/measurements.md`
   consistency check sees two different moves through height alone; a
   clip whose halves differ only sideways passes it.
 - The video step is pluggable and unproven on real clips: paid models
-  (Seedance, Kling, MiniMax) wait for the release batch; the free
-  Wan 2.2 TI2V-5B attempt is recorded in `docs/measurements.md`.
+  (Seedance, Kling, MiniMax) wait for the release batch. The free
+  Wan 2.2 TI2V-5B try (`python/creature/video_wan.py`) kept the layout
+  and passed the consistency check but barely moved the creature
+  (`docs/measurements.md`).
 - The exam films through Blender, the same renderer the finder trained
   on; real video shifts the domain (the degradation is the hedge).

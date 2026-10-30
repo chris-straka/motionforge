@@ -184,7 +184,29 @@ biped (2 min). Meshes, rigs, renders and weights stay local.
   `creature_project`, `creature_solve` (+ GLB), `creature_compare`.
 - Blender: `test_headless.py` "creature_solve finishes", the animated
   rig GLB imports with its action (3 objects), missing inputs cancel.
-- Video step (free, Wan 2.2 TI2V-5B, Apache-2.0): see the line below.
+- Rebuilt from scratch 2026-10-30 after the job was restarted (same
+  meshes, same seeds): rigs identical (wolf 29 bones 1.4722, golem 22
+  bones 1.500), renders 0.20 s per sample (586 s per creature), training
+  1,240 s each (wolf 6.39 px, golem val as before), RSS 5 GB after the
+  uint8 image cache; exam `--check` against the committed baseline: wolf
+  22.3 -> 22.1 mm, 8.48 -> 8.54 deg; golem 15.6 -> 15.7 mm, 8.49 -> 8.57
+  deg: PASS.
+- Video step, free model: `python/creature/video_wan.py` (Wan 2.2
+  TI2V-5B, Apache-2.0) on the wolf start frame, 49 frames at 1024x512,
+  20 steps, guidance 5, seed 1, CanItCode's strict prompt. Fits the
+  8 GB card and the job's 22.7 GB memory limit only with the text
+  encoder in its own process, tensor-by-tensor fp16 loading with
+  page-cache eviction and fp8 weight storage: prompt 51 s, sampling
+  291 s (8 s per step), peak 4.5 GB VRAM, 20.7 GB job memory. The clip
+  kept the layout (front left, side right), the plain background and
+  one creature with no camera move, and the pipeline accepted it
+  (`creature-solve`: views agree, ray gap 0.70%, residual 10.6 mm,
+  detector confidence 0.91), but the wolf hardly moves: the solved
+  animation's largest bone change is 3.6 deg first to last frame (mean
+  peak 1.9 deg). Verdict: not a usable animation source at these
+  settings; the video step stays pluggable (`detect.py --video` reads
+  any composite clip). Untried: more steps, higher guidance, a looser
+  prompt, the paid models.
 
 ## Pending owner gates (not runnable here)
 
