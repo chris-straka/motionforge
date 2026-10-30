@@ -19,6 +19,7 @@ in docs/measurements.md.
 
 import argparse
 import gc
+import glob
 import json
 import os
 import time
@@ -37,6 +38,24 @@ NEGATIVE = ("dust, smoke, fog, particles, motion blur, camera shake, camera move
             "second creature, people, text, watermark, logo, shadows on the ground, grass, rocks, trees, floor texture, "
             "colour change, texture, fur detail, lighting change, flicker, deformation, extra legs, missing legs, "
             "walking away, leaving the frame, turning around, jumping, flying, blurry, low quality")
+
+
+def drop_page_cache(model, subfolder):
+    """Evict a subfolder's weight files from the page cache: mmapped
+    safetensors count against the job's memory limit after use."""
+    try:
+        from huggingface_hub import snapshot_download
+
+        root = snapshot_download(model, allow_patterns=[f"{subfolder}/*"], local_files_only=True)
+    except Exception:
+        return
+    for path in glob.glob(os.path.join(root, subfolder, "*.safetensors")):
+        try:
+            fd = os.open(os.path.realpath(path), os.O_RDONLY)
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def main():
@@ -84,11 +103,16 @@ def main():
     del enc
     gc.collect()
     torch.cuda.empty_cache()
+    drop_page_cache(MODEL, "text_encoder")
     log["text_seconds"] = round(time.time() - t0, 1)
 
     # 2. Transformer + VAE, streamed through the card.
     vae = AutoencoderKLWan.from_pretrained(MODEL, subfolder="vae", torch_dtype=torch.float32)
     transformer = WanTransformer3DModel.from_pretrained(MODEL, subfolder="transformer", torch_dtype=torch.float16)
+    # fp8 storage halves the 10 GB of weights in RAM; compute stays fp16.
+    transformer.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=torch.float16)
+    gc.collect()
+    drop_page_cache(MODEL, "transformer")
     pipe = WanImageToVideoPipeline.from_pretrained(MODEL, vae=vae, transformer=transformer, text_encoder=None, tokenizer=None, torch_dtype=torch.float16)
     pipe.transformer.enable_group_offload(onload_device=torch.device("cuda"), offload_device=torch.device("cpu"), offload_type="leaf_level", use_stream=True)
     pipe.vae.to("cuda")
