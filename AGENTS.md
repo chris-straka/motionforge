@@ -1,5 +1,7 @@
 # motionforge — agent notes
 
+One rules file only: this `AGENTS.md` is it — never create a `CLAUDE.md` in this folder (Muse ignores it and warns while both exist).
+
 Game-animation sidekick for Bevy games: retarget assist, motion stylizer,
 physics pass, and ML AutoPose. Same split as `~/Games/_blender/retopoforge`:
 an MIT-licensed Rust core + CLI, driven as a subprocess over files by
