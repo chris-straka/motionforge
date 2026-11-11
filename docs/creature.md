@@ -91,6 +91,19 @@ Numbers below are measured; the commands are in `docs/measurements.md`
    deterministic half of the exam (perfect and noisy synthetic
    detections, the reject case) on the fixture biped.
 
+## A four-legged walk and lunge without video
+
+`creature-gait --creature c.json --glb-in rig.glb --glb-out out.glb --rom
+rom.ron` reads a quadruped's parts off its profile (the four chains that
+end in feet, front or hind by where they leave the body; the spine between
+them; the chain reaching forward from the chest; the one reaching back
+from the hips), writes a walk and a lunge on that skeleton into the GLB,
+and writes its range of motion as a weightforge pose set (`weights check
+--poses rom.ron`). It is forward kinematics on the spot, to show a rig
+moving and to judge its weights on what a four-legged body does; the
+video route above is still the way to real motion. `tools/tripo_rig.py`
+(`docs/tripo-rig.md`) runs it for every creature.
+
 ## Formats
 
 - `motionforge-creature` v1: `name`, `height`, `ground`, `forward`

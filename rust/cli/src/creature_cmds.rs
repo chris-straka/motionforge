@@ -6,6 +6,7 @@ use crate::{parse_f64, parse_usize, read_file, write_file, Cmd};
 use motion_core::clip::{emit_clip, parse_clip};
 use motion_core::creature::compare::compare;
 use motion_core::creature::detect::{project_clip, Detections};
+use motion_core::creature::gait;
 use motion_core::creature::glbanim::clip_to_glb;
 use motion_core::creature::motion::{exam_motion, training_poses};
 use motion_core::creature::profile::Creature;
@@ -309,6 +310,78 @@ pub fn cmd_solve(cmd: &Cmd) -> Result<String, (i32, String)> {
         r.push_str(&format!("report: {}\n", p));
     }
     r.push_str(&format!("output: {}\n", output));
+    Ok(r)
+}
+
+/// creature-gait --creature c.json [--glb-in rig.glb --glb-out out.glb]
+/// [--clips walk,attack] [--frames 24] [--fps 24] [--rom rom.ron]
+///
+/// A quadruped's parts read from its profile; a walk and a lunge made on
+/// its own skeleton and written into its GLB; its range of motion as a
+/// weightforge pose set.
+pub fn cmd_gait(cmd: &Cmd) -> Result<String, (i32, String)> {
+    let c = load_creature(cmd)?;
+    let parts = gait::parts(&c).map_err(|e| (3, e))?;
+    let frames = parse_usize(cmd, "frames", 24)?;
+    if frames < 2 {
+        return Err((1, "--frames must be at least 2".into()));
+    }
+    let fps = parse_f64(cmd, "fps", 24.0)?;
+    if !(fps > 0.0 && fps <= 1e4) {
+        return Err((1, "--fps must be in (0, 1e4]".into()));
+    }
+    let name = |b: usize| c.skeleton.bones[b].name.as_str();
+    let list = |bones: &[usize]| {
+        bones
+            .iter()
+            .map(|&b| name(b))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut r = String::new();
+    r.push_str("=== motionforge creature-gait ===\n");
+    for leg in &parts.legs {
+        r.push_str(&format!(
+            "{} {} leg: {}\n",
+            if leg.front { "front" } else { "hind" },
+            if leg.left { "left" } else { "right" },
+            list(&leg.bones)
+        ));
+    }
+    r.push_str(&format!("spine: {}\n", list(&parts.spine)));
+    r.push_str(&format!("neck: {}\n", list(&parts.neck)));
+    r.push_str(&format!("tail: {}\n", list(&parts.tail)));
+    if let Some(p) = cmd.get("rom") {
+        write_file(p, &gait::rom_ron(&c, &parts))?;
+        r.push_str(&format!("rom: {}\n", p));
+    }
+    match (cmd.get("glb-in"), cmd.get("glb-out")) {
+        (Some(gi), Some(go)) => {
+            let mut doc = Document::read(gi).map_err(|e| (2, format!("glb-in: {}", e)))?;
+            let wanted = cmd.get("clips").unwrap_or("walk,attack");
+            for clip_name in wanted.split(',').filter(|s| !s.is_empty()) {
+                let clip = match clip_name {
+                    "walk" => gait::walk(&c, &parts, frames, fps),
+                    "attack" => gait::attack(&c, &parts, frames, fps),
+                    other => {
+                        return Err((
+                            1,
+                            format!("--clips: unknown clip '{}' (walk, attack)", other),
+                        ))
+                    }
+                };
+                doc = clip_to_glb(&doc, &clip, clip_name).map_err(|e| (3, e))?;
+                r.push_str(&format!(
+                    "clip {}: {} frames at {} fps\n",
+                    clip_name, frames, fps
+                ));
+            }
+            doc.write(go).map_err(|e| (3, e))?;
+            r.push_str(&format!("glb: {}\n", go));
+        }
+        (None, None) => {}
+        _ => return Err((1, "--glb-in and --glb-out go together".into())),
+    }
     Ok(r)
 }
 

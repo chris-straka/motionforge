@@ -10,6 +10,7 @@
 pub mod camera;
 pub mod compare;
 pub mod detect;
+pub mod gait;
 pub mod glbanim;
 pub mod motion;
 pub mod profile;

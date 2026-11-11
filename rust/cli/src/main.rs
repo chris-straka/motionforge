@@ -46,6 +46,7 @@ commands:\n\
   creature-project  synthetic two-view detections from a clip\n\
   creature-solve    two-view detections -> clip (+ GLB animation)\n\
   creature-compare  score a solved clip against its truth, bone by bone\n\
+  creature-gait     a quadruped's parts, a walk and a lunge on its own skeleton, its range of motion\n\
 \n\
 retarget flags:\n\
   --source <clip> --target <skeleton|clip> --map <bonemap> --output <clip>\n\
@@ -125,6 +126,10 @@ creature-solve flags:\n\
 \n\
 creature-compare flags:\n\
   --creature <creature> --truth <clip> --solved <clip> [--output <json>]\n\
+\n\
+creature-gait flags:\n\
+  --creature <creature> [--glb-in <rig glb> --glb-out <glb>] [--clips walk,attack]\n\
+  [--frames 24] [--fps 24] [--rom <weightforge pose set .ron>]\n\
 \n\
 global: --help/-h, --version/-v, --time (wall ms on stderr)\n";
 
@@ -665,6 +670,7 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "creature-project" => creature_cmds::cmd_project(&args),
             "creature-solve" => creature_cmds::cmd_solve(&args),
             "creature-compare" => creature_cmds::cmd_compare(&args),
+            "creature-gait" => creature_cmds::cmd_gait(&args),
             other => Err((1, format!("unknown command '{}'; try --help", other))),
         },
         Err(e) => Err(e),
