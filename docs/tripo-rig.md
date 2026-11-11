@@ -97,9 +97,11 @@ What the failures are:
 - **`creature-profile` failed on every one** ("non-finite float in
   output"): `drop_debris` counted each UV island as a loose part and
   dropped the whole mesh. Fixed (parts are joined by position first).
-- **The cloaked figure has no rig.** skintokens ran to its length cap on
-  it and past 12 GB of memory (fleet stopped the job). The route for it
-  is open: rigforge's fitter, or a body under the cloak.
+- **The cloaked figure has no rig.** `skintokens rig` went past 12 GB of
+  memory on it within seconds, twice (fleet stopped both jobs at 14.3
+  and 13.7 GB; the other seven models rig in about 3.5 GB). Why is not
+  found. The route for it is open: rigforge's fitter, or a body under
+  the cloak.
 
 ## Not done
 
