@@ -5,6 +5,7 @@
     python3 tools/tripo_rig.py MODEL.fbx OUT_DIR [--name NAME]
         [--kind auto|human|creature] [--class hero|npc|monster]
         [--seeds 1,2,3] [--tris N] [--height M] [--convention +x|...|none]
+        [--clips LIBRARY.glb [--pick walk=walk,attack_1=attack]]
         [--no-fix] [--fix-args "..."] [--keep-tries]
 
 Steps, each a tool of its own:
@@ -14,8 +15,13 @@ Steps, each a tool of its own:
 2. `skintokens rig`, once per seed: a skeleton and weights.
 3. `motionforge standardize`: canonical bone names; a human gets the
    twist helpers and hand sockets, a creature keeps its own skeleton.
+   Then its clips: a human's are retargeted from `--clips` (`motionforge
+   animate`); a four-legged creature gets a walk and a lunge made on its
+   own skeleton (`creature-profile`, `creature-gait`), and its range of
+   motion written as a pose set.
 4. `weights fix` (weightforge): repairs what its range-of-motion check
-   flags; then `weights check` is the gate.
+   flags; then `weights check` is the gate. A human is posed through the
+   humanoid set, a creature through its own; both through their clips.
 5. `rfcheck`: the export contract and the class's budget.
 
 The best try wins: one that passes the gate before one that doesn't,
@@ -66,8 +72,10 @@ def tail(text, n=300):
 
 
 def rank(t):
-    """Sort key: gate passed, then contract clean, then score, then seed."""
-    return (not t.get("pass", False), not t.get("contract", False), -t.get("score", 0.0), t.get("seed", 0))
+    """Sort key: gate passed, then contract clean, then fewer failing
+    findings (the gate is "none"), then score, then seed."""
+    return (not t.get("pass", False), not t.get("contract", False), len(t.get("fails", [])),
+            -t.get("score", 0.0), t.get("seed", 0))
 
 
 def pick_best(tries):
@@ -90,6 +98,8 @@ def main():
     ap.add_argument("--fix-args", default="")
     ap.add_argument("--fix-timeout", type=int, default=1800)
     ap.add_argument("--keep-tries", action="store_true")
+    ap.add_argument("--clips", action="append", default=[], help="a human's clip library (GLB or folder), repeatable")
+    ap.add_argument("--pick", default="", help="motionforge animate --pick: which clips, and their names")
     for tool in ("blender", "skintokens", "motionforge", "weights", "rfcheck"):
         ap.add_argument(f"--{tool}", default="")
     a = ap.parse_args()
@@ -170,18 +180,56 @@ def main():
             save()
             continue
         t["rigged"] = True
-        raw = check(wf, std)
+        poses = []
+        if not human:
+            # A creature: its parts read from the skeleton, a walk and a
+            # lunge made on it, and a quadruped's range of motion to judge
+            # it by (without one, weightforge bends every bone 45 degrees
+            # each way, which no creature's weights survive).
+            prof, clean_glb, moving, rom = base + ".creature.json", base + ".clean.glb", base + ".moving.glb", base + ".rom.ron"
+            r = run([mf, "creature-profile", "--rig", std, "--output", prof, "--clean-glb", clean_glb,
+                     "--report", base + ".profile.json", "--name", name])
+            t["profile"] = {"code": r["code"], "secs": r["secs"]}
+            if r["code"] == 0:
+                r = run([mf, "creature-gait", "--creature", prof, "--glb-in", clean_glb, "--glb-out", moving,
+                         "--rom", rom])
+                t["gait"] = {"code": r["code"], "parts": [ln for ln in r["out"].splitlines() if ": " in ln][:8]}
+                if r["code"] == 0:
+                    std, poses = moving, ["--poses", rom]
+                else:
+                    t["gait"]["error"] = tail(r["err"] or r["out"])
+            else:
+                t["profile"]["error"] = tail(r["err"] or r["out"])
+        elif a.clips:
+            # A human: clips retargeted from a library before the check, so
+            # the gate sees them too.
+            moving = base + ".moving.glb"
+            cmd = [mf, "animate", "--input", std, "--output", moving]
+            for c in a.clips:
+                cmd += ["--clips", c]
+            if a.pick:
+                cmd += ["--pick", a.pick]
+            r = run(cmd, timeout=1800)
+            t["animate"] = {"code": r["code"], "secs": r["secs"]}
+            if r["code"] == 0 and os.path.exists(moving):
+                std = moving
+            else:
+                t["animate"]["error"] = tail(r["err"] or r["out"])
+        t["judged_on"] = "quadruped range of motion" if poses else ("humanoid range of motion" if human else "any-skeleton fallback")
+        raw = check(wf, std, poses)
         t["raw"] = raw
         if a.no_fix or raw["pass"]:
             shutil.copyfile(std, fixed)
         else:
-            cmd = [wf, "fix", std, "--out", fixed, "--sheet", base + ".sheet.png"] + shlex.split(a.fix_args)
+            cmd = [wf, "fix", std, "--out", fixed, "--sheet", base + ".sheet.png"] + poses + shlex.split(a.fix_args)
             r = run(cmd, timeout=a.fix_timeout)
             t["fix"] = {"code": r["code"], "secs": r["secs"]}
             if not os.path.exists(fixed):
                 t["fix"]["error"] = tail(r["err"] or r["out"])
                 shutil.copyfile(std, fixed)
-        final = check(wf, fixed)
+        final = check(wf, fixed, poses)
+        if poses:
+            shutil.copyfile(poses[1], os.path.join(a.out, name + ".rom.ron"))
         t.update(score=final["score"], **{"pass": final["pass"]}, fails=final["fails"])
         r = run([rf, "--json", "--class", klass, fixed])
         t["contract"] = r["code"] == 0
@@ -201,13 +249,15 @@ def main():
     if os.path.exists(base + ".sheet.png"):
         shutil.copyfile(base + ".sheet.png", os.path.join(a.out, name + ".sheet.png"))
     else:
-        run([wf, "sheet", os.path.join(a.out, name + ".glb"), "--out", os.path.join(a.out, name + ".sheet.png")])
+        rom = os.path.join(a.out, name + ".rom.ron")
+        run([wf, "sheet", os.path.join(a.out, name + ".glb"), "--out", os.path.join(a.out, name + ".sheet.png")]
+            + (["--poses", rom] if os.path.exists(rom) else []))
     report["best_seed"] = best["seed"]
     report["ok"] = bool(best["pass"] and best["contract"])
     save()
     if not a.keep_tries:
         for t in report["tries"]:
-            for ext in (".rig.glb", ".std.glb", ".glb"):
+            for ext in (".rig.glb", ".std.glb", ".clean.glb", ".moving.glb", ".glb"):
                 p = os.path.join(a.out, f"try_s{t['seed']}{ext}")
                 if os.path.exists(p):
                     os.remove(p)
@@ -217,8 +267,8 @@ def main():
     return 0 if report["ok"] else 1
 
 
-def check(wf, glb):
-    r = run([wf, "check", glb, "--json"], timeout=1800)
+def check(wf, glb, poses=()):
+    r = run([wf, "check", glb, "--json"] + list(poses), timeout=1800)
     try:
         d = json.loads(r["out"])
     except ValueError:

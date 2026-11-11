@@ -175,8 +175,10 @@ def mend_holes(obj, limit):
             if near:
                 f.material_index = near.material_index
         bmesh.ops.recalc_face_normals(bm, faces=new)
-        filled = len(small)
     left = boundary_loops(bm)
+    # What closed, counted after the fact: a rim that touches itself or
+    # another rim doesn't always fill.
+    filled = max(0, found - len(left))
     out = {
         "found": found,
         "open_edges": open_edges,
