@@ -436,6 +436,21 @@ pub fn push_num(out: &mut String, v: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// A non-finite number's error with where it sits in the tree, built from
+/// the inside out: `non-finite float in output at .bones[3].tail[1]`. The
+/// bare message sent a whole profile back with no way to tell which of a
+/// few hundred numbers was the NaN.
+fn locate(e: String, part: String) -> String {
+    const BASE: &str = "non-finite float in output";
+    match e.strip_prefix(BASE) {
+        Some(rest) => format!(
+            "{BASE} at {part}{}",
+            rest.strip_prefix(" at ").unwrap_or(rest)
+        ),
+        None => e,
+    }
+}
+
 /// Emit a [`Json`] tree compactly (object key order preserved).
 pub fn emit(value: &Json) -> Result<String, String> {
     let mut out = String::new();
@@ -486,7 +501,7 @@ fn emit_into(
                 if !scalar {
                     newline(out, indent, depth + 1);
                 }
-                emit_into(out, item, indent, depth + 1)?;
+                emit_into(out, item, indent, depth + 1).map_err(|e| locate(e, format!("[{i}]")))?;
             }
             if !scalar && !items.is_empty() {
                 newline(out, indent, depth);
@@ -505,7 +520,7 @@ fn emit_into(
                 if indent.is_some() {
                     out.push(' ');
                 }
-                emit_into(out, v, indent, depth + 1)?;
+                emit_into(out, v, indent, depth + 1).map_err(|e| locate(e, format!(".{k}")))?;
             }
             if !pairs.is_empty() {
                 newline(out, indent, depth);
@@ -519,6 +534,35 @@ fn emit_into(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_non_finite_number_says_where_it_is() {
+        let tree = Json::Obj(vec![(
+            "bones".to_string(),
+            Json::Arr(vec![
+                Json::Obj(vec![(
+                    "tail".to_string(),
+                    Json::Arr(vec![Json::Num(1.0), Json::Num(2.0)]),
+                )]),
+                Json::Obj(vec![(
+                    "tail".to_string(),
+                    Json::Arr(vec![Json::Num(0.0), Json::Num(f64::NAN)]),
+                )]),
+            ]),
+        )]);
+        assert_eq!(
+            emit(&tree).unwrap_err(),
+            "non-finite float in output at .bones[1].tail[1]"
+        );
+        assert_eq!(
+            emit_pretty(&tree).unwrap_err(),
+            "non-finite float in output at .bones[1].tail[1]"
+        );
+        assert_eq!(
+            emit(&Json::Num(f64::INFINITY)).unwrap_err(),
+            "non-finite float in output"
+        );
+    }
 
     #[test]
     fn deep_nesting_is_an_error_not_a_stack_overflow() {

@@ -216,7 +216,12 @@ pub fn read_mesh(doc: &Document, rig: &Rig) -> Result<Mesh, String> {
 
 /// Drop connected components holding fewer than `fraction` of the
 /// vertices (floating debris a generator leaves under the feet would
-/// otherwise set the ground and the bounds).
+/// otherwise set the ground and the bounds). Vertices at one point count
+/// as one vertex: an exporter splits them along UV seams and hard edges,
+/// and a body cut into a hundred UV islands is not a hundred pieces of
+/// debris (every Tripo creature, 2026-11-11: all of it was dropped, the
+/// ground came out infinite and the profile could not be written). The
+/// largest component always stays.
 pub fn drop_debris(mesh: Mesh, fraction: f64) -> Mesh {
     let n = mesh.verts.len();
     let mut parent: Vec<usize> = (0..n).collect();
@@ -227,12 +232,31 @@ pub fn drop_debris(mesh: Mesh, fraction: f64) -> Mesh {
         }
         i
     }
+    fn join(parent: &mut [usize], a: usize, b: usize) {
+        let (ra, rb) = (find(parent, a), find(parent, b));
+        if ra != rb {
+            parent[ra.max(rb)] = ra.min(rb);
+        }
+    }
     for t in &mesh.tris {
-        for (a, b) in [(t[0], t[1]), (t[1], t[2])] {
-            let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
-            if ra != rb {
-                parent[ra.max(rb)] = ra.min(rb);
-            }
+        join(&mut parent, t[0], t[1]);
+        join(&mut parent, t[1], t[2]);
+    }
+    // Weld by position (to a hundredth of a millimetre), by sorting: no
+    // hashing, so the result never depends on iteration order.
+    let key = |i: usize| {
+        let p = mesh.verts[i];
+        [
+            (p.x * 1e5).round() as i64,
+            (p.y * 1e5).round() as i64,
+            (p.z * 1e5).round() as i64,
+        ]
+    };
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by_key(|&i| (key(i), i));
+    for w in order.windows(2) {
+        if key(w[0]) == key(w[1]) {
+            join(&mut parent, w[0], w[1]);
         }
     }
     let mut count = vec![0usize; n];
@@ -240,7 +264,8 @@ pub fn drop_debris(mesh: Mesh, fraction: f64) -> Mesh {
     for &r in &roots {
         count[r] += 1;
     }
-    let min = ((n as f64) * fraction).ceil() as usize;
+    let largest = count.iter().copied().max().unwrap_or(0);
+    let min = (((n as f64) * fraction).ceil() as usize).min(largest);
     let keep: Vec<bool> = (0..n).map(|i| count[roots[i]] >= min).collect();
     if keep.iter().all(|k| *k) {
         return mesh;
@@ -934,6 +959,64 @@ mod tests {
         // Round trip through text keeps the skeleton.
         let back = Creature::parse(&c.emit().unwrap()).unwrap();
         assert_eq!(back.skeleton.len(), c.skeleton.len());
+    }
+
+    /// A flat sheet of `n` by `n` squares, every square with four
+    /// vertices of its own (as an exporter writes a mesh cut along seams).
+    fn split_sheet(n: usize) -> Mesh {
+        let mut verts = Vec::new();
+        let mut tris = Vec::new();
+        for i in 0..n {
+            for j in 0..n {
+                let b = verts.len();
+                for (dx, dy) in [(0, 0), (1, 0), (1, 1), (0, 1)] {
+                    verts.push(Vec3::new((i + dx) as f64 * 0.1, (j + dy) as f64 * 0.1, 0.0));
+                }
+                tris.push([b, b + 1, b + 2]);
+                tris.push([b, b + 2, b + 3]);
+            }
+        }
+        Mesh { verts, tris }
+    }
+
+    #[test]
+    fn a_mesh_split_at_its_seams_is_one_piece_not_debris() {
+        // 100 squares, each 1% of the vertices: under the 2% line one by
+        // one, the whole body together.
+        let mut m = split_sheet(10);
+        let body = m.verts.len();
+        // A speck floating under it: real debris.
+        let b = m.verts.len();
+        for (x, y) in [(5.0, 5.0), (5.01, 5.0), (5.0, 5.01)] {
+            m.verts.push(Vec3::new(x, y, -3.0));
+        }
+        m.tris.push([b, b + 1, b + 2]);
+        let kept = drop_debris(m, 0.02);
+        assert_eq!(kept.verts.len(), body);
+        assert_eq!(kept.tris.len(), 200);
+        let (lo, hi) = kept.bounds();
+        assert!(
+            lo.z == 0.0 && hi.z == 0.0,
+            "the speck set the ground: {lo:?}"
+        );
+    }
+
+    #[test]
+    fn the_largest_piece_always_stays() {
+        // Sixty loose squares that touch nothing: every one under 2%.
+        let mut m = split_sheet(1);
+        for k in 1..60 {
+            let b = m.verts.len();
+            for (dx, dy) in [(0.0, 0.0), (0.1, 0.0), (0.1, 0.1), (0.0, 0.1)] {
+                m.verts.push(Vec3::new(k as f64 + dx, dy, 0.0));
+            }
+            m.tris.push([b, b + 1, b + 2]);
+            m.tris.push([b, b + 2, b + 3]);
+        }
+        let kept = drop_debris(m, 0.02);
+        assert!(!kept.verts.is_empty(), "everything was dropped");
+        let (lo, _) = kept.bounds();
+        assert!(lo.z.is_finite());
     }
 
     #[test]
