@@ -126,8 +126,8 @@ as our route, made after their rig.
   ours 103, Tripo's 83; its crotch is the better one (9 against 49 in
   `hip_forward.R`), and its arms drag a dagger on the belt with them (27
   in `arm_up.R`, 22 in `arm_forward.R`, where ours has none). Second
-  woman: ours 30, Tripo's 9, with no crotch failure at all against our
-  11. Wolf: ours 136, Tripo's 565. The score counts every vertex's
+  woman: ours 30, Tripo's 9, with no crotch failure at all where ours
+  has 11. Wolf: ours 136, Tripo's 565. The score counts every vertex's
   deformation, the speckled finger weights included, not only the
   vertices past the fail line; that is where Tripo's humans lose it.
 - Its humans keep finger bones (65 joints against our 26 after
