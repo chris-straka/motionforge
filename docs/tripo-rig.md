@@ -103,6 +103,34 @@ What the failures are:
   found. The route for it is open: rigforge's fitter, or a body under
   the cloak.
 
+## Tripo's own Auto Rig, scored (2026-11-11)
+
+Three of the same models rigged by Tripo Studio's Auto Rig (20 credits
+each; humans on its Mixamo preset, the wolf on "Other") and scored with
+the same check. Each export was welded, turned to face +Z from its own
+foot bones, then standardized; "at our budget" is the same triangle cut
+as our route, made after their rig.
+
+| Model                         | Tripo, as exported | Tripo, at our budget, raw to fixed | Ours, raw to fixed      |
+| ----------------------------- | ------------------ | ---------------------------------- | ----------------------- |
+| Woman, fitted clothes         | 38.9, 10 failing   | 13.0 to 15.1, 7 failing            | 59.7 to 59.9, 2 failing |
+| Woman, shirt and belt pouches | 60.9, 12 failing   | 9.2 to 44.9, 2 failing             | 70.6 to 80.0, 3 failing |
+| Wolf, long fur                | not scored         | 27.8 to 38.5, 16 failing           | 45.3 to 62.8, 9 failing |
+
+- It doesn't pass the gate and doesn't beat our route on any of the
+  three. On the full mesh it fails where ours does (the thighs and spine
+  in `hip_forward`, the arms in `arm_up`), which fits: the geometry is
+  what's fused.
+- Its humans keep finger bones (65 joints against our 26 after
+  standardize), so they are also posed through finger curls, and fail
+  some. Cutting triangles after rigging speckles the finger weights,
+  which is most of the low raw scores at our budget; our route cuts
+  first.
+- Its wolf skeleton has 35 joints and no left-right mirror among its 22
+  side joints; `creature-profile` still finds four legs.
+- What it adds: fingers on a Mixamo skeleton for a few credits. What it
+  changes in the plan: nothing.
+
 ## Not done
 
 - Nothing passes the gate. The crotch and armpit strips need either
