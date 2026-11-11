@@ -117,10 +117,19 @@ as our route, made after their rig.
 | Woman, shirt and belt pouches | 60.9, 12 failing   | 9.2 to 44.9, 2 failing             | 70.6 to 80.0, 3 failing |
 | Wolf, long fur                | not scored         | 27.8 to 38.5, 16 failing           | 45.3 to 62.8, 9 failing |
 
-- It doesn't pass the gate and doesn't beat our route on any of the
-  three. On the full mesh it fails where ours does (the thighs and spine
-  in `hip_forward`, the arms in `arm_up`), which fits: the geometry is
+- It doesn't pass the gate, and by score our route leads on all three.
+  On the full mesh it fails where ours does (the thighs and spine in
+  `hip_forward`, the arms in `arm_up`), which fits: the geometry is
   what's fused.
+- Pose by pose it is closer than the scores (`weights compare --zoom`,
+  both at our budget, failing vertices over every pose). First woman:
+  ours 103, Tripo's 83; its crotch is the better one (9 against 49 in
+  `hip_forward.R`), and its arms drag a dagger on the belt with them (27
+  in `arm_up.R`, 22 in `arm_forward.R`, where ours has none). Second
+  woman: ours 30, Tripo's 9, with no crotch failure at all against our
+  11. Wolf: ours 136, Tripo's 565. The score counts every vertex's
+  deformation, the speckled finger weights included, not only the
+  vertices past the fail line; that is where Tripo's humans lose it.
 - Its humans keep finger bones (65 joints against our 26 after
   standardize), so they are also posed through finger curls, and fail
   some. Cutting triangles after rigging speckles the finger weights,
