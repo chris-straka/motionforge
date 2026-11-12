@@ -741,3 +741,177 @@ pub fn adapter_main(argv: &[String]) -> i32 {
         1
     }
 }
+
+/// `motionforge motion check <glb>`: score every clip of a rigged GLB
+/// (`motion_core::motioncheck`; `docs/motion-check.md`).
+pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
+    use motion_core::motioncheck::{check_doc, ATTACK_WORDS};
+    let input = cmd.required("input")?;
+    let doc = load(input)?;
+    let opts = contact_opts(cmd)?.unwrap_or_default();
+    let only: Vec<String> = cmd
+        .all("clip")
+        .iter()
+        .flat_map(|c| c.split(','))
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .collect();
+    let words: Vec<String> = match cmd.get("attack-clips") {
+        Some(list) => list
+            .split(',')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        None => ATTACK_WORDS.iter().map(|w| w.to_string()).collect(),
+    };
+    let fps = match cmd.get("fps") {
+        Some(_) => {
+            let f = crate::parse_f64(cmd, "fps", 30.0)?;
+            if !(1.0..=240.0).contains(&f) {
+                return Err((1, "--fps must be in 1..240".into()));
+            }
+            Some(f)
+        }
+        None => None,
+    };
+    let (subject, scores) = check_doc(&doc, &opts, &only, &words, fps).map_err(|e| (3, e))?;
+    for o in &only {
+        if !scores.iter().any(|s| &s.name == o) {
+            return Err((2, format!("no clip named '{}'", o)));
+        }
+    }
+    if cmd.flag("json") {
+        let j = Json::obj(vec![
+            ("height_m", Json::num(round(subject.height, 4))),
+            ("scale_k", Json::num(round(subject.k, 4))),
+            (
+                "clips",
+                Json::Arr(scores.iter().map(|s| s.to_json()).collect()),
+            ),
+        ]);
+        return pretty(&j);
+    }
+    let mut r = String::from("=== motionforge motion check ===\n");
+    r.push_str(&format!(
+        "character {:.3} m tall; lengths as on a 1.75 m body; jerk m/s^3 mean/peak (worst chain), root mean\n",
+        subject.height
+    ));
+    for s in &scores {
+        r.push_str(&s.line());
+    }
+    if scores.len() > 1 {
+        let n = |s: &motion_core::motioncheck::ClipScore| s.frames.max(1) as f64;
+        let mut by: Vec<(&str, Vec<(String, f64)>)> = vec![
+            (
+                "skate (share of frames)",
+                scores
+                    .iter()
+                    .map(|s| (s.name.clone(), s.feet.skate_frames as f64 / n(s)))
+                    .collect(),
+            ),
+            (
+                "through the body (share of frames)",
+                scores
+                    .iter()
+                    .map(|s| {
+                        (
+                            s.name.clone(),
+                            s.through
+                                .as_ref()
+                                .map(|t| t.mesh_frames as f64 / n(s))
+                                .unwrap_or(0.0),
+                        )
+                    })
+                    .collect(),
+            ),
+            (
+                "jerk (worst chain mean)",
+                scores
+                    .iter()
+                    .map(|s| (s.name.clone(), s.jerk_worst().1))
+                    .collect(),
+            ),
+        ];
+        r.push_str("worst:\n");
+        for (what, list) in by.iter_mut() {
+            list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then(a.0.cmp(&b.0)));
+            let top: Vec<String> = list
+                .iter()
+                .take(3)
+                .filter(|(_, v)| *v > 0.0)
+                .map(|(n, v)| {
+                    if what.starts_with("jerk") {
+                        format!("{} {:.0}", n, v)
+                    } else {
+                        format!("{} {:.0}%", n, v * 100.0)
+                    }
+                })
+                .collect();
+            r.push_str(&format!(
+                "  {}: {}\n",
+                what,
+                if top.is_empty() {
+                    "none".into()
+                } else {
+                    top.join(", ")
+                }
+            ));
+        }
+    }
+    Ok(r)
+}
+
+/// `motionforge stylize --input <rigged glb>`: the stylizer on a GLB's
+/// own clips (`motion_core::stylize_body`).
+pub fn cmd_stylize_glb(cmd: &Cmd, base: motion_core::stylize::StylizeParams) -> CmdResult {
+    use motion_core::stylize_body::{stylize_glb, BodyParams, Mode};
+    let input = cmd.required("input")?;
+    let output = cmd.required("output")?;
+    let mode = match cmd.get("mode").unwrap_or("body") {
+        "body" => Mode::Body,
+        "per-bone" => Mode::PerBone,
+        other => return Err((1, format!("--mode must be body|per-bone, got '{}'", other))),
+    };
+    let params = BodyParams {
+        base,
+        key_prominence: crate::parse_f64(cmd, "key-prominence", 0.25)?,
+        ..BodyParams::default()
+    };
+    let clips: Vec<String> = cmd
+        .all("clip")
+        .iter()
+        .flat_map(|c| c.split(','))
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .collect();
+    let doc = load(input)?;
+    let replant = !cmd.flag("no-replant") && mode == Mode::Body;
+    let (out, reports) =
+        stylize_glb(&doc, &params, mode, &clips, cmd.get("suffix"), replant).map_err(|e| (3, e))?;
+    save(&out, output)?;
+    let mut r = format!(
+        "=== motionforge stylize ({}) ===\n",
+        if mode == Mode::Body {
+            "body"
+        } else {
+            "per-bone"
+        }
+    );
+    for c in &reports {
+        r.push_str(&format!(
+            "clip {} (from {}): {} frames, keys {:?}, big {:?}, anticipation {} added {} skipped",
+            c.name, c.source, c.frames, c.keys, c.big, c.counters_added, c.counters_skipped
+        ));
+        if replant {
+            r.push_str(&format!(
+                ", feet re-planted: {} plants, {} frames, ankle moved up to {:.1} cm",
+                c.plants,
+                c.replant_frames,
+                c.replant_max_m * 100.0
+            ));
+        }
+        r.push('\n');
+    }
+    r.push_str(&format!("output: {}\n", output));
+    Ok(r)
+}

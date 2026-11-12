@@ -89,7 +89,7 @@ impl StylizeParams {
         Ok(())
     }
 
-    fn factor_for(&self, bone: &str) -> f64 {
+    pub fn factor_for(&self, bone: &str) -> f64 {
         for (substr, f) in &self.chain_factors {
             if bone.contains(substr) {
                 return *f;

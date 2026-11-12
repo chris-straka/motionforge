@@ -36,6 +36,7 @@ commands:\n\
   clip-info      validate a clip and print its inventory\n\
   standardize    rig GLB -> standard humanoid skeleton (DEF-* names, canonical parents)\n\
   animate        retarget clip GLBs onto a rigged GLB (+ contact pass)\n\
+  motion check   score each clip of a rigged GLB: foot skate, ground, limbs in the body, jerk, attack timing\n\
   grip           find a weapon clip set's grip, write it into the hand socket\n\
   pose-test      range-of-motion poses as animations (+ rendered sheet)\n\
   fixture-glb    procedural skinned test humanoid GLB\n\
@@ -53,12 +54,19 @@ retarget flags:\n\
   --yaw auto|flip|none (default auto)  --pin|--no-pin (default --pin)\n\
 \n\
 stylize flags:\n\
-  --input <clip> --output <clip>\n\
+  --input <clip|rigged glb> --output <clip|glb>\n\
+  GLB: --mode body|per-bone (default body: shared key poses, one clock, exaggeration\n\
+  from the clip's own neutral, feet re-planted)  --clip <name> (repeatable; default all)\n\
+  --suffix <s> (keep originals, add <name><s>)  --no-replant  --key-prominence <0..1> (default 0.25)\n\
   --exaggeration <0..4> (default 1.35)  --chain <substr:factor> (repeatable)\n\
   --angle-threshold <rad> (default 0.15)  --min-spacing <n> (default 4)\n\
   --hold <n> (default 2)  --anticipation <0..1> (default 0.25)\n\
   --anticipation-frames <n> (default 3)  --overshoot <0..2> (default 0.6)\n\
   --keys-out <keys> (per-bone key frames sidecar for thinned import)\n\
+\n\
+motion check flags (also: motion-check --input <glb>):\n\
+  motion check <rigged glb> [--clip NAME] (repeatable) [--json] [--fps <n>]\n\
+  [--weapon R|L|none] [--weapon-clips <a,b>] [--attack-clips <a,b>]\n\
 \n\
 physics-frame flags:\n\
   --input <clip> --frame <n> --root <bone> --feet <a,b,...>\n\
@@ -173,6 +181,8 @@ fn is_bool_flag(key: &str) -> bool {
             | "no-balance"
             | "twisted"
             | "no-contact"
+            | "json"
+            | "no-replant"
             | "walk"
             | "force"
             | "time"
@@ -377,29 +387,20 @@ fn cmd_retarget(cmd: &Cmd) -> Result<String, (i32, String)> {
 }
 
 fn cmd_stylize(cmd: &Cmd) -> Result<String, (i32, String)> {
-    let input_text = read_file(cmd.required("input")?)?;
+    let input = cmd.required("input")?;
     let output = cmd.required("output")?.to_string();
-    let clip = parse_clip(&input_text).map_err(|e| (2, format!("input: {}", e)))?;
-    let mut chain_factors = Vec::new();
-    for raw in cmd.all("chain") {
-        let (substr, factor) = raw
-            .rsplit_once(':')
-            .ok_or_else(|| (1, format!("--chain must be substr:factor, got '{}'", raw)))?;
-        let factor: f64 = factor
-            .parse()
-            .map_err(|_| (1, format!("--chain factor must be a number, got '{}'", raw)))?;
-        chain_factors.push((substr.to_string(), factor));
+    let params = stylize_params(cmd)?;
+    if input.to_ascii_lowercase().ends_with(".glb") {
+        return glb_cmds::cmd_stylize_glb(cmd, params);
     }
-    let params = StylizeParams {
-        exaggeration: parse_f64(cmd, "exaggeration", 1.35)?,
-        chain_factors,
-        angle_threshold: parse_f64(cmd, "angle-threshold", 0.15)?,
-        min_spacing: parse_usize(cmd, "min-spacing", 4)?,
-        hold: parse_usize(cmd, "hold", 2)?,
-        anticipation: parse_f64(cmd, "anticipation", 0.25)?,
-        anticipation_frames: parse_usize(cmd, "anticipation-frames", 3)?,
-        overshoot: parse_f64(cmd, "overshoot", 0.6)?,
-    };
+    if cmd.get("mode").is_some_and(|m| m != "per-bone") {
+        return Err((
+            1,
+            "--mode body needs a rigged GLB input; clip JSON runs per-bone".into(),
+        ));
+    }
+    let input_text = read_file(input)?;
+    let clip = parse_clip(&input_text).map_err(|e| (2, format!("input: {}", e)))?;
     let (out, report) = motion_core::stylize::stylize(&clip, &params).map_err(|e| (3, e))?;
     let text = emit_clip(&out).map_err(|e| (3, e))?;
     write_file(&output, &text)?;
@@ -427,6 +428,30 @@ fn cmd_stylize(cmd: &Cmd) -> Result<String, (i32, String)> {
     ));
     r.push_str(&format!("output: {}\n", output));
     Ok(r)
+}
+
+fn stylize_params(cmd: &Cmd) -> Result<StylizeParams, (i32, String)> {
+    let mut chain_factors = Vec::new();
+    for raw in cmd.all("chain") {
+        let (substr, factor) = raw
+            .rsplit_once(':')
+            .ok_or_else(|| (1, format!("--chain must be substr:factor, got '{}'", raw)))?;
+        let factor: f64 = factor
+            .parse()
+            .map_err(|_| (1, format!("--chain factor must be a number, got '{}'", raw)))?;
+        chain_factors.push((substr.to_string(), factor));
+    }
+    let params = StylizeParams {
+        exaggeration: parse_f64(cmd, "exaggeration", 1.35)?,
+        chain_factors,
+        angle_threshold: parse_f64(cmd, "angle-threshold", 0.15)?,
+        min_spacing: parse_usize(cmd, "min-spacing", 4)?,
+        hold: parse_usize(cmd, "hold", 2)?,
+        anticipation: parse_f64(cmd, "anticipation", 0.25)?,
+        anticipation_frames: parse_usize(cmd, "anticipation-frames", 3)?,
+        overshoot: parse_f64(cmd, "overshoot", 0.6)?,
+    };
+    Ok(params)
 }
 
 fn physics_params(cmd: &Cmd, for_fix: bool) -> Result<PhysicsParams, (i32, String)> {
@@ -661,6 +686,7 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "clip-info" => cmd_clip_info(&args),
             "standardize" => glb_cmds::cmd_standardize(&args),
             "animate" => glb_cmds::cmd_animate(&args),
+            "motion-check" => glb_cmds::cmd_motion_check(&args),
             "grip" => glb_cmds::cmd_grip(&args),
             "pose-test" => glb_cmds::cmd_pose_test(&args),
             "fixture-glb" => glb_cmds::cmd_fixture_glb(&args),
@@ -688,7 +714,17 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
 }
 
 fn main() {
-    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let mut argv: Vec<String> = std::env::args().skip(1).collect();
+    // `motion check <glb> ...` is `motion-check --input <glb> ...`.
+    if argv.len() >= 2 && argv[0] == "motion" && argv[1] == "check" {
+        argv.drain(0..2);
+        let mut v = vec!["motion-check".to_string()];
+        if argv.first().is_some_and(|a| !a.starts_with("--")) {
+            v.push("--input".into());
+        }
+        v.extend(argv);
+        argv = v;
+    }
     if argv.first().map(String::as_str) == Some("adapter") {
         let code = glb_cmds::adapter_main(&argv[1..]);
         std::io::stdout().flush().ok();
