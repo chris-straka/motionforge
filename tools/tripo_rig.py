@@ -7,6 +7,7 @@
         [--seeds 1,2,3] [--tris N] [--height M] [--convention +x|...|none]
         [--clips LIBRARY.glb [--pick walk=walk,attack_1=attack]]
         [--no-fix] [--fix-args "..."] [--keep-tries]
+        [--unfuse [--unfuse-args "..."]]
 
 Steps, each a tool of its own:
 
@@ -19,6 +20,13 @@ Steps, each a tool of its own:
    animate`); a four-legged creature gets a walk and a lunge made on its
    own skeleton (`creature-profile`, `creature-gait`), and its range of
    motion written as a pose set.
+   With `--unfuse` (off by default) a human's rig is tried a second
+   time with its legs cut apart: `meshkit/tools/unfuse.py` slits the lump
+   that holds both thighs (a tunic or coat skirt, wide trousers, thighs
+   fused by the generator) up to the hip joints and walls each half, and
+   `weights fix` then gives each half to its own leg. The cut copy
+   (`try_s<seed>.cut.*`) is ranked with the others, so it is kept only
+   when it does better; `report.json` says which won (`best_cut`).
 4. `weights fix` (weightforge): repairs what its range-of-motion check
    flags; then `weights check` is the gate. A human is posed through the
    humanoid set, a creature through its own; both through their clips.
@@ -73,9 +81,10 @@ def tail(text, n=300):
 
 def rank(t):
     """Sort key: gate passed, then contract clean, then fewer failing
-    findings (the gate is "none"), then score, then seed."""
+    findings (the gate is "none"), then score, then seed, then the uncut
+    model before its cut copy."""
     return (not t.get("pass", False), not t.get("contract", False), len(t.get("fails", [])),
-            -t.get("score", 0.0), t.get("seed", 0))
+            -t.get("score", 0.0), t.get("seed", 0), t.get("cut", False))
 
 
 def pick_best(tries):
@@ -98,6 +107,10 @@ def main():
     ap.add_argument("--fix-args", default="")
     ap.add_argument("--fix-timeout", type=int, default=1800)
     ap.add_argument("--keep-tries", action="store_true")
+    ap.add_argument("--unfuse", action="store_true",
+                    help="a human: also try each rig with fused legs cut apart (meshkit tools/unfuse.py)")
+    ap.add_argument("--unfuse-args", default="")
+    ap.add_argument("--unfuse-tool", default="", help="path to unfuse.py (default: the sibling meshkit repo, or $UNFUSE_PY)")
     ap.add_argument("--clips", action="append", default=[], help="a human's clip library (GLB or folder), repeatable")
     ap.add_argument("--pick", default="", help="motionforge animate --pick: which clips, and their names")
     for tool in ("blender", "skintokens", "motionforge", "weights", "rfcheck"):
@@ -113,6 +126,9 @@ def main():
     wf = find("weights", a.weights, "WEIGHTS_BIN", [os.path.join(sib, "weightforge/rust/target/release/weights")])
     rf = find("rfcheck", a.rfcheck, "RFCHECK_BIN", [os.path.join(sib, "rfcheck/target/release/rfcheck"),
                                                      os.path.join(home, ".cargo/bin/rfcheck")])
+    unfuse = a.unfuse_tool or os.environ.get("UNFUSE_PY") or os.path.join(sib, "meshkit/tools/unfuse.py")
+    if a.unfuse and not os.path.exists(unfuse):
+        raise SystemExit(f"unfuse.py not found at {unfuse}: pass --unfuse-tool or set UNFUSE_PY")
     name = a.name or os.path.basename(os.path.dirname(os.path.abspath(a.model))) or "model"
     os.makedirs(a.out, exist_ok=True)
     report = {"model": os.path.abspath(a.model), "name": name, "steps": {}, "tries": []}
@@ -153,33 +169,11 @@ def main():
           f"{h.get('filled', 0)} filled, {h.get('left', '?')} left")
     save()
 
-    # 2-5, once per seed.
-    for seed in [int(s) for s in a.seeds.split(",") if s]:
-        t = {"seed": seed, "rigged": False}
-        report["tries"].append(t)
-        base = os.path.join(a.out, f"try_s{seed}")
-        rig, std, fixed = base + ".rig.glb", base + ".std.glb", base + ".glb"
-        r = run([sk, "rig", mesh, rig, "--report", base + ".skintokens.json",
-                 "--class", "humanoid" if human else "quadruped", "--seed", str(seed)], timeout=3600)
-        t["rig"] = {"code": r["code"], "secs": r["secs"]}
-        if r["code"] != 0 or not os.path.exists(rig):
-            try:
-                with open(base + ".skintokens.json") as f:
-                    t["rig"]["error"] = json.load(f).get("error") or tail(r["err"])
-            except (OSError, ValueError):
-                t["rig"]["error"] = tail(r["err"])
-            print(f"  seed {seed}: no rig: {t['rig']['error']}")
-            save()
-            continue
-        r = run([mf, "standardize", "--input", rig, "--output", std, "--class",
-                 "humanoid" if human else "quadruped", "--report", base + ".standardize.json"])
-        t["standardize"] = {"code": r["code"], "secs": r["secs"]}
-        if r["code"] != 0 or not os.path.exists(std):
-            t["standardize"]["error"] = tail(r["err"] or r["out"])
-            print(f"  seed {seed}: standardize failed: {t['standardize']['error']}")
-            save()
-            continue
-        t["rigged"] = True
+    def finish(t, base, std):
+        """Clips, the check, the fix, the gate and the contract for one
+        rigged model (`std`); the result is `base + ".glb"`."""
+        fixed = base + ".glb"
+        label = f"seed {t['seed']}" + (" (cut)" if t.get("cut") else "")
         poses = []
         if not human:
             # A creature: its parts read from the skeleton, a walk and a
@@ -234,17 +228,63 @@ def main():
         r = run([rf, "--json", "--class", klass, fixed])
         t["contract"] = r["code"] == 0
         t["rfcheck"] = contract_notes(r["out"])
-        print(f"  seed {seed}: {raw['score']} -> {t['score']} "
+        print(f"  {label}: {raw['score']} -> {t['score']} "
               f"({'passes' if t['pass'] else str(len(t['fails'])) + ' failing'}; "
               f"contract {'clean' if t['contract'] else 'broken: ' + ', '.join(t['rfcheck'][:4])})")
         save()
+
+    # 2-5, once per seed.
+    for seed in [int(s) for s in a.seeds.split(",") if s]:
+        t = {"seed": seed, "rigged": False}
+        report["tries"].append(t)
+        base = os.path.join(a.out, f"try_s{seed}")
+        rig, std = base + ".rig.glb", base + ".std.glb"
+        r = run([sk, "rig", mesh, rig, "--report", base + ".skintokens.json",
+                 "--class", "humanoid" if human else "quadruped", "--seed", str(seed)], timeout=3600)
+        t["rig"] = {"code": r["code"], "secs": r["secs"]}
+        if r["code"] != 0 or not os.path.exists(rig):
+            try:
+                with open(base + ".skintokens.json") as f:
+                    t["rig"]["error"] = json.load(f).get("error") or tail(r["err"])
+            except (OSError, ValueError):
+                t["rig"]["error"] = tail(r["err"])
+            print(f"  seed {seed}: no rig: {t['rig']['error']}")
+            save()
+            continue
+        r = run([mf, "standardize", "--input", rig, "--output", std, "--class",
+                 "humanoid" if human else "quadruped", "--report", base + ".standardize.json"])
+        t["standardize"] = {"code": r["code"], "secs": r["secs"]}
+        if r["code"] != 0 or not os.path.exists(std):
+            t["standardize"]["error"] = tail(r["err"] or r["out"])
+            print(f"  seed {seed}: standardize failed: {t['standardize']['error']}")
+            save()
+            continue
+        t["rigged"] = True
+        finish(t, base, std)
+        if a.unfuse and human:
+            # The same rig with fused legs cut apart (meshkit unfuse): a
+            # second try, so the cut is kept only when it ranks better.
+            cut = base + ".cut.std.glb"
+            r = run([blender, "-b", "--factory-startup", "--python", unfuse, "--", std, cut,
+                     "--report", base + ".unfuse.json"] + shlex.split(a.unfuse_args), timeout=900)
+            line = [ln for ln in r["out"].splitlines() if ln.startswith("UNFUSE ")]
+            info = json.loads(line[-1][len("UNFUSE "):]) if r["code"] == 0 and line else {}
+            if info.get("cut") and os.path.exists(cut):
+                t2 = {"seed": seed, "rigged": True, "cut": True, "rig": t["rig"], "standardize": t["standardize"],
+                      "unfuse": {k: info[k] for k in ("legs", "verts_before", "verts") if k in info}}
+                report["tries"].append(t2)
+                finish(t2, base + ".cut", cut)
+            else:
+                t["unfuse"] = {"cut": False, "why": (info.get("legs") or {}).get("why_not") or tail(r["err"] or r["out"], 160)}
+                print(f"  seed {seed}: not cut: {t['unfuse']['why']}")
+                save()
 
     best = pick_best(report["tries"])
     if not best:
         save()
         print(f"{name}: no try gave a rig")
         return 2
-    base = os.path.join(a.out, f"try_s{best['seed']}")
+    base = os.path.join(a.out, f"try_s{best['seed']}" + (".cut" if best.get("cut") else ""))
     shutil.copyfile(base + ".glb", os.path.join(a.out, name + ".glb"))
     if os.path.exists(base + ".sheet.png"):
         shutil.copyfile(base + ".sheet.png", os.path.join(a.out, name + ".sheet.png"))
@@ -253,12 +293,13 @@ def main():
         run([wf, "sheet", os.path.join(a.out, name + ".glb"), "--out", os.path.join(a.out, name + ".sheet.png")]
             + (["--poses", rom] if os.path.exists(rom) else []))
     report["best_seed"] = best["seed"]
+    report["best_cut"] = bool(best.get("cut"))
     report["ok"] = bool(best["pass"] and best["contract"])
     save()
     if not a.keep_tries:
         for t in report["tries"]:
             for ext in (".rig.glb", ".std.glb", ".clean.glb", ".moving.glb", ".glb"):
-                p = os.path.join(a.out, f"try_s{t['seed']}{ext}")
+                p = os.path.join(a.out, f"try_s{t['seed']}{'.cut' if t.get('cut') else ''}{ext}")
                 if os.path.exists(p):
                     os.remove(p)
     print(f"{name}: seed {best['seed']}, score {best['score']}, "
