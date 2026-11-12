@@ -146,6 +146,17 @@ as our route, made after their rig.
   geometry that isn't fused there (a model generated with the legs apart
   and the arms away, or a wrap onto a base body: `wrapforge`) or a fix
   candidate made for a fused crease.
+- Tried and dropped (2026-11-11): evening out lopsided weights. Our
+  humans' weights are lopsided where the body is not (in the strip between
+  the legs one thigh holds 64% and the other 23% on the first woman;
+  Tripo's are 49% and 44%), so a `weights fix` candidate averaged each
+  vertex with the weights at its reflection, partner bones swapped. It
+  scored worse everywhere it was offered: the first woman's right thigh
+  region 46.6 to 24.7, the second's thighs 82.0 to 61.6 and 76.1 to 55.7.
+  The average of two different boundaries is a wide half-and-half band,
+  and that band collapses. Offering Tripo's own weights as a candidate
+  told nothing: carried onto our skeleton they scored under 10 in every
+  region.
 - The creature clips are forward kinematics: feet slide, and the lunge is
   one shape for every body.
 - Faces and fingers: standardize folds a generated hand's fingers into the
