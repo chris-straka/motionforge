@@ -128,7 +128,7 @@ creature-compare flags:\n\
   --creature <creature> --truth <clip> --solved <clip> [--output <json>]\n\
 \n\
 creature-gait flags:\n\
-  --creature <creature> [--glb-in <rig glb> --glb-out <glb>] [--clips walk,attack]\n\
+  --creature <creature> [--glb-in <rig glb> --glb-out <glb>] [--clips walk,trot,walk_spot,attack] [--clips-json <dir>]\n\
   [--frames 24] [--fps 24] [--rom <weightforge pose set .ron>]\n\
 \n\
 global: --help/-h, --version/-v, --time (wall ms on stderr)\n";

@@ -91,18 +91,53 @@ Numbers below are measured; the commands are in `docs/measurements.md`
    deterministic half of the exam (perfect and noisy synthetic
    detections, the reject case) on the fixture biped.
 
-## A four-legged walk and lunge without video
+## A four-legged walk and trot without video
 
 `creature-gait --creature c.json --glb-in rig.glb --glb-out out.glb --rom
-rom.ron` reads a quadruped's parts off its profile (the four chains that
-end in feet, front or hind by where they leave the body; the spine between
-them; the chain reaching forward from the chest; the one reaching back
-from the hips), writes a walk and a lunge on that skeleton into the GLB,
-and writes its range of motion as a weightforge pose set (`weights check
---poses rom.ron`). It is forward kinematics on the spot, to show a rig
-moving and to judge its weights on what a four-legged body does; the
-video route above is still the way to real motion. `tools/tripo_rig.py`
+rom.ron [--clips walk,trot,attack] [--clips-json DIR]` reads a quadruped's
+parts off its profile (the four chains that end in feet, front or hind by
+where they leave the body; the spine between them; the chain reaching
+forward from the chest; the one reaching back from the hips) and writes
+clips on that skeleton into the GLB, and its range of motion as a
+weightforge pose set (`weights check --poses rom.ron`). `tools/tripo_rig.py`
 (`docs/tripo-rig.md`) runs it for every creature.
+
+**`walk` and `trot` keep their feet where they are put** (`gait::stride`,
+2026-11-11). Each foot is given a spot on the ground for as long as it
+bears weight and an arc through the air when it steps; the leg is solved
+to reach it:
+
+- Timing from the creature's own legs: the cadence from the gait's Froude
+  number (walk 0.20, trot 0.90) and its stride in hip heights (1.6, 2.3);
+  a foot is down 65% of a walk's cycle (four beats: hind left, front
+  left, hind right, front right) and 42% of a trot's (diagonal pairs).
+- The stride is cut to what the legs reach with the body lowered 7% of
+  the hip height, and the speed goes down with it, not the cadence up: a
+  model that stands on nearly straight legs takes short, calm steps.
+- The leg: joint positions by reaching back and forth from the rest shape
+  as the body carries it (24 passes; every joint keeps bending the way it
+  does at rest), each bone then aimed along its segment with no added
+  twist, the paw kept flat as it stands at rest. Bones never stretch: a
+  spot out of reach is met as far as a nearly straight leg allows.
+- The clip stays on the spot. The command prints the speed to move the
+  body at ("move the body 0.935 m/s"); moved at that speed, a planted
+  foot holds its place (the test allows 0.2% of the height). While a foot
+  steps it leaves and lands at the body's speed and rises 11% (walk) or
+  16% (trot) of the hip height.
+- The body bobs twice a cycle, the spine sways with the hind legs, the
+  head nods against the bob, the tail swings behind.
+- Measured (2026-11-11, two generated models): a horse walks 0.94 m/s
+  with a 0.47 m stance in a 0.77 s cycle and trots 1.93 m/s; a wolf whose
+  legs stand almost straight walks 0.64 m/s with a 0.30 m stance and
+  trots 1.60 m/s.
+- Not done: flat ground only (placing feet on slopes is the game's, at
+  run time); no turn or start and stop clips; the paw does not roll off
+  its toes.
+
+`attack` (a lunge) and `walk_spot` (the older walk, legs swung by angle,
+feet sliding; kept to set beside `walk`) are plain forward kinematics.
+`--clips-json DIR` also writes each clip as `DIR/<name>.clip.json` for
+`python/creature/render.py --mode motion`.
 
 ## Formats
 
@@ -110,7 +145,7 @@ video route above is still the way to real motion. `tools/tripo_rig.py`
   (horizontal unit vector), `feet` (bone names), `bones`
   (`name, parent, head, tail, max_angle_deg`; same skeleton rules as
   `motionforge-skeleton`), `views` (`name, position, look_at,
-  fov_y_deg, width, height`; pixel origin top-left of each view).
+fov_y_deg, width, height`; pixel origin top-left of each view).
 - `motionforge-detections` v1: `fps`, `views`, `joints`, `frames` =
   `[[ [u, v, confidence] per joint ] per view] per frame`, pixels of
   the view's own image; confidence 0 = missing.
@@ -128,10 +163,22 @@ video route above is still the way to real motion. `tools/tripo_rig.py`
 - Two orthogonal views only share one coordinate (height), so the
   consistency check sees two different moves through height alone; a
   clip whose halves differ only sideways passes it.
-- The video step is pluggable and unproven on real clips: paid models
-  (Seedance, Kling, MiniMax) wait for the release batch. The free
-  Wan 2.2 TI2V-5B try (`python/creature/video_wan.py`) kept the layout
-  and passed the consistency check but barely moved the creature
+- The video step is pluggable. The free Wan 2.2 TI2V-5B try
+  (`python/creature/video_wan.py`) kept the layout and passed the
+  consistency check but barely moved the creature
   (`docs/measurements.md`).
+- **The first real clip was rejected (2026-11-11).** A five-second walk
+  of a generated wolf from Seedance 2.0 Fast (720p, the two-view start
+  frame padded to 16:9, 121 frames at 24 fps): the creature walks on the
+  spot in both views with still cameras. Its joint finder (3,000 poses,
+  12 epochs, 1,252 s on the 8 GB card) held out at 8.46 px mean, 5.19 px
+  median; on the clip the mean confidence was 0.82. `creature-solve`
+  refused it: median ray gap 4.7% of the height (limit 8%), but the
+  height-disagreement motion ratio was 1.14 (limit 0.50): the legs in
+  the two views are out of step. Not built yet, and what the next clip
+  needs: one view slid in time against the other (dynamic time warping
+  on joint heights), the cameras re-aligned on the first frame (the
+  video model re-frames the start picture), and the clip's real frame
+  timing.
 - The exam films through Blender, the same renderer the finder trained
   on; real video shifts the domain (the degradation is the hedge).

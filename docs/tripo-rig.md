@@ -40,9 +40,9 @@ says what failed. Exit 2: a step could not run.
      with `--clips` its clips retargeted from a library (`animate`);
    - a four-legged creature keeps its skeleton. `creature-profile` reads
      it, `creature-gait` names its parts (four legs, spine, neck, tail),
-     makes a walk and a lunge on it (there is no four-legged clip library
-     to retarget from) and writes its range of motion as a weightforge
-     pose set.
+     makes a walk and a trot with planted feet and a lunge on it (there
+     is no four-legged clip library to retarget from) and writes its
+     range of motion as a weightforge pose set.
 4. **Fix and gate**: `weights fix`, then `weights check`. A human is posed
    through weightforge's humanoid set, a creature through its own set,
    both through their clips.
@@ -157,7 +157,8 @@ as our route, made after their rig.
   and that band collapses. Offering Tripo's own weights as a candidate
   told nothing: carried onto our skeleton they scored under 10 in every
   region.
-- The creature clips are forward kinematics: feet slide, and the lunge is
-  one shape for every body.
+- A creature's walk and trot now keep their feet planted
+  (`docs/creature.md`, "A four-legged walk and trot without video"); its
+  lunge is still forward kinematics, one shape for every body.
 - Faces and fingers: standardize folds a generated hand's fingers into the
   hand; nothing here rigs a face.

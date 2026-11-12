@@ -314,7 +314,8 @@ pub fn cmd_solve(cmd: &Cmd) -> Result<String, (i32, String)> {
 }
 
 /// creature-gait --creature c.json [--glb-in rig.glb --glb-out out.glb]
-/// [--clips walk,attack] [--frames 24] [--fps 24] [--rom rom.ron]
+/// [--clips walk,trot,attack] [--frames 24] [--fps 24] [--rom rom.ron]
+/// [--clips-json <dir>] (each clip also as <dir>/<name>.clip.json, for the renderer)
 ///
 /// A quadruped's parts read from its profile; a walk and a lunge made on
 /// its own skeleton and written into its GLB; its range of motion as a
@@ -358,22 +359,46 @@ pub fn cmd_gait(cmd: &Cmd) -> Result<String, (i32, String)> {
     match (cmd.get("glb-in"), cmd.get("glb-out")) {
         (Some(gi), Some(go)) => {
             let mut doc = Document::read(gi).map_err(|e| (2, format!("glb-in: {}", e)))?;
-            let wanted = cmd.get("clips").unwrap_or("walk,attack");
+            let wanted = cmd.get("clips").unwrap_or("walk,trot,attack");
             for clip_name in wanted.split(',').filter(|s| !s.is_empty()) {
-                let clip = match clip_name {
-                    "walk" => gait::walk(&c, &parts, frames, fps),
-                    "attack" => gait::attack(&c, &parts, frames, fps),
+                let planted = |g: gait::Gait| {
+                    let s = gait::stride(&c, &parts, g, fps);
+                    let note = format!(
+                        ", feet planted: move the body {:.3} m/s ({:.2} s a cycle, each foot down {:.0}% of it over {:.3} m)",
+                        s.speed,
+                        s.period,
+                        s.duty * 100.0,
+                        s.stance
+                    );
+                    (s.clip, note)
+                };
+                let (clip, note) = match clip_name {
+                    "walk" => planted(gait::Gait::Walk),
+                    "trot" => planted(gait::Gait::Trot),
+                    "walk_spot" => (gait::walk_spot(&c, &parts, frames, fps), String::new()),
+                    "attack" => (gait::attack(&c, &parts, frames, fps), String::new()),
                     other => {
                         return Err((
                             1,
-                            format!("--clips: unknown clip '{}' (walk, attack)", other),
+                            format!(
+                                "--clips: unknown clip '{}' (walk, trot, walk_spot, attack)",
+                                other
+                            ),
                         ))
                     }
                 };
+                if let Some(dir) = cmd.get("clips-json") {
+                    let path = format!("{}/{}.clip.json", dir.trim_end_matches('/'), clip_name);
+                    let text = motion_core::clip::emit_clip(&clip).map_err(|e| (3, e))?;
+                    write_file(&path, &text)?;
+                }
                 doc = clip_to_glb(&doc, &clip, clip_name).map_err(|e| (3, e))?;
                 r.push_str(&format!(
-                    "clip {}: {} frames at {} fps\n",
-                    clip_name, frames, fps
+                    "clip {}: {} frames at {} fps{}\n",
+                    clip_name,
+                    clip.frames.len(),
+                    fps,
+                    note
                 ));
             }
             doc.write(go).map_err(|e| (3, e))?;

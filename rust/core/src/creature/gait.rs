@@ -7,19 +7,23 @@
 //!   tail bend. Without it a creature is judged on weightforge's fallback
 //!   for skeletons it can't read, every bone bent 45 degrees each way and
 //!   twisted, which no wolf does and no wolf's weights survive;
-//! - a walk and a lunge made on the creature's own skeleton, for bodies
-//!   with no clip library to retarget from. They are plain forward
-//!   kinematics (a four-beat walk on the spot, a crouch and strike), meant
-//!   to show a rig moving, not to be the last word on its animation.
+//! - a walk and a trot whose feet stay where they are put (`stride`): each
+//!   foot is given a spot on the ground for as long as it bears weight and
+//!   an arc through the air when it steps, and the leg is solved to reach
+//!   it. The clip stays on the spot and comes with the speed to move the
+//!   body at; moved at that speed, no foot slides;
+//! - a lunge, and the older walk on the spot, in plain forward kinematics
+//!   (a crouch and strike; legs swung by angle), meant to show a rig
+//!   moving, not to be the last word on its animation.
 //!
 //! Everything is in the profile's frame (Z up). Rotations are given about
 //! world axes and carried into each bone's own rest frame, so a parent's
 //! turn carries its children as in any skeleton.
 
 use super::profile::Creature;
-use crate::clip::{Clip, Frame, Pose};
+use crate::clip::{fk, Clip, Frame, Pose};
 use crate::detmath;
-use crate::math::{zero_roll_basis, Quat, Vec3};
+use crate::math::{zero_roll_basis, Mat3, Quat, Vec3};
 
 const TAU: f64 = std::f64::consts::PI * 2.0;
 
@@ -250,23 +254,25 @@ impl<'a> Poser<'a> {
         }
     }
     fn frame(self) -> Frame {
-        let root = self.c.root();
-        // The root's own frame: its pose offset is in its rest axes.
-        let b = &self.c.skeleton.bones[root];
-        let local = zero_roll_basis(b.head, b.tail)
-            .transpose()
-            .mul_vec(self.shift);
-        Frame {
-            poses: self
-                .quats
-                .into_iter()
-                .enumerate()
-                .map(|(i, quat)| Pose {
-                    loc: if i == root { local } else { Vec3::ZERO },
-                    quat,
-                })
-                .collect(),
-        }
+        make_frame(self.c, &self.quats, self.shift)
+    }
+}
+
+/// A frame from every bone's pose turn and the whole body's move (world).
+fn make_frame(c: &Creature, quats: &[Quat], shift: Vec3) -> Frame {
+    let root = c.root();
+    // The root's own frame: its pose offset is in its rest axes.
+    let b = &c.skeleton.bones[root];
+    let local = zero_roll_basis(b.head, b.tail).transpose().mul_vec(shift);
+    Frame {
+        poses: quats
+            .iter()
+            .enumerate()
+            .map(|(i, quat)| Pose {
+                loc: if i == root { local } else { Vec3::ZERO },
+                quat: *quat,
+            })
+            .collect(),
     }
 }
 
@@ -284,11 +290,10 @@ fn fold(p: &mut Poser, leg: &Leg, amount: f64) {
     }
 }
 
-/// A four-beat walk on the spot, one cycle that loops: hind left, front
-/// left, hind right, front right, each leg swinging back on the ground and
-/// folding as it comes forward; the spine sways toward the leading hind
-/// leg, the head nods twice a cycle, the tail swings behind.
-pub fn walk(c: &Creature, parts: &Parts, frames: usize, fps: f64) -> Clip {
+/// The older four-beat walk on the spot, by angle alone: each leg swings
+/// back and folds as it comes forward, with nothing holding a foot to the
+/// ground (its feet slide). Kept to set beside `stride`.
+pub fn walk_spot(c: &Creature, parts: &Parts, frames: usize, fps: f64) -> Clip {
     let offsets = [0.0, 0.5, 0.25, 0.75]; // hind L, hind R, front L, front R
     let mut out = Vec::with_capacity(frames);
     for f in 0..frames {
@@ -326,6 +331,234 @@ pub fn walk(c: &Creature, parts: &Parts, frames: usize, fps: f64) -> Clip {
         fps,
         skeleton: c.skeleton.clone(),
         frames: out,
+    }
+}
+
+/// A gait with planted feet.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Gait {
+    /// Four beats, each foot on the ground about two thirds of the time.
+    Walk,
+    /// Two beats, diagonal pairs together, a moment in the air between.
+    Trot,
+}
+
+impl Gait {
+    /// (share of the cycle a foot is down, the legs' places in the cycle in
+    /// `Parts` order, Froude number, stride in hip heights, foot lift in
+    /// hip heights, body bob in hip heights, spine sway in degrees).
+    fn shape(self) -> (f64, [f64; 4], f64, f64, f64, f64, f64) {
+        match self {
+            // Hind left, front left, hind right, front right.
+            Gait::Walk => (0.65, [0.0, 0.5, 0.25, 0.75], 0.20, 1.6, 0.11, 0.012, 4.0),
+            Gait::Trot => (0.42, [0.0, 0.5, 0.5, 0.0], 0.90, 2.3, 0.16, 0.030, 2.0),
+        }
+    }
+}
+
+/// One cycle of a planted-feet gait, on the spot, and what the game needs
+/// to move the body under it.
+pub struct Stride {
+    pub clip: Clip,
+    /// Metres a second the body must move forward for the feet to hold.
+    pub speed: f64,
+    /// Seconds a cycle.
+    pub period: f64,
+    /// Share of the cycle each foot is on the ground.
+    pub duty: f64,
+    /// Metres the body passes over one planted foot.
+    pub stance: f64,
+}
+
+/// A leg as the solver sees it: its joints' offsets in their parent
+/// bone's rest frame, and the paw that is kept flat.
+struct LegRig {
+    bones: Vec<usize>,
+    /// Bone k's joint to the next joint, in bone k's rest frame.
+    segs: Vec<Vec3>,
+    /// The paw's rest orientation and its head-to-tail in the world.
+    paw_rest: Mat3,
+    paw_vec: Vec3,
+    /// Where the paw's tail stands at rest.
+    contact: Vec3,
+    /// All the solved segments end to end.
+    reach: f64,
+    /// The top joint's height above the ankle at rest.
+    drop: f64,
+}
+
+fn leg_rig(c: &Creature, leg: &Leg) -> LegRig {
+    let sk = &c.skeleton;
+    let n = leg.bones.len();
+    let paw = leg.bones[n - 1];
+    let segs: Vec<Vec3> = (0..n - 1)
+        .map(|k| {
+            let (a, b) = (leg.bones[k], leg.bones[k + 1]);
+            sk.rest_world(a)
+                .transpose()
+                .mul_vec(sk.bones[b].head - sk.bones[a].head)
+        })
+        .collect();
+    LegRig {
+        bones: leg.bones.clone(),
+        reach: segs.iter().map(|s| s.length()).sum(),
+        segs,
+        paw_rest: sk.rest_world(paw),
+        paw_vec: sk.bones[paw].tail - sk.bones[paw].head,
+        contact: sk.bones[paw].tail,
+        drop: sk.bones[leg.bones[0]].head.z - sk.bones[paw].head.z,
+    }
+}
+
+/// Solve one leg onto `contact` (where its paw's tail must be), given the
+/// body already posed: joint positions by reaching back and forth from the
+/// carried rest shape (so every joint keeps bending the way it does at
+/// rest), then each bone aimed along its segment with no added twist, and
+/// the paw kept flat as it stands at rest. A spot out of reach is met as
+/// far as a nearly straight leg allows.
+fn solve_leg(c: &Creature, rig: &LegRig, quats: &mut [Quat], shift: Vec3, contact: Vec3) {
+    let sk = &c.skeleton;
+    let m = rig.segs.len();
+    if m == 0 {
+        return;
+    }
+    for &b in &rig.bones {
+        quats[b] = Quat::IDENTITY;
+    }
+    let posed = fk(sk, &make_frame(c, quats, shift));
+    let mut pts: Vec<Vec3> = rig.bones.iter().map(|&b| posed[b].head).collect();
+    let lens: Vec<f64> = rig.segs.iter().map(|s| s.length()).collect();
+    let hip = pts[0];
+    let mut ankle = contact - rig.paw_vec;
+    let far = (ankle - hip).length();
+    if far > 0.99 * rig.reach {
+        ankle = hip + (ankle - hip).scale(0.99 * rig.reach / far);
+    }
+    for _ in 0..24 {
+        pts[m] = ankle;
+        for k in (0..m).rev() {
+            pts[k] = pts[k + 1] + (pts[k] - pts[k + 1]).normalized().scale(lens[k]);
+        }
+        pts[0] = hip;
+        for k in 0..m {
+            pts[k + 1] = pts[k] + (pts[k + 1] - pts[k]).normalized().scale(lens[k]);
+        }
+    }
+    let top = rig.bones[0];
+    let mut parent_rot = match sk.bones[top].parent {
+        Some(p) => posed[p].rot,
+        None => Mat3::identity(),
+    };
+    for k in 0..m {
+        let b = rig.bones[k];
+        // The root's own turn was applied in `posed`; a leg's top bone is
+        // never the root (`parts` requires a body above it).
+        let carried = parent_rot.mul_mat(sk.rest_parent_rel(b).0);
+        let cur = carried.mul_vec(rig.segs[k]).normalized();
+        let want = (pts[k + 1] - pts[k]).normalized();
+        let axis = cur.cross(want);
+        let turn = if axis.length() < 1e-12 {
+            Quat::IDENTITY
+        } else {
+            let angle = detmath::acos(cur.dot(want).clamp(-1.0, 1.0));
+            Quat::from_axis_angle(carried.transpose().mul_vec(axis).normalized(), angle)
+        };
+        quats[b] = turn;
+        parent_rot = carried.mul_mat(turn.to_mat3());
+    }
+    let paw = rig.bones[m];
+    let carried = parent_rot.mul_mat(sk.rest_parent_rel(paw).0);
+    quats[paw] = Quat::from_mat3(carried.transpose().mul_mat(rig.paw_rest)).normalized();
+}
+
+/// One cycle of a walk or a trot with planted feet, sized from the
+/// creature's own legs: the cadence from the gait's Froude number and its
+/// stride in hip heights, the stride shortened to what the legs can reach
+/// with the body a little lowered, and the speed with it.
+///
+/// On the spot: while a foot bears weight its spot on the ground slides
+/// back under the body at exactly `speed`; when it steps it leaves and
+/// lands at that same speed and rises in between. The body bobs twice a
+/// cycle, the spine sways with the hind legs, the head nods against the
+/// bob, the tail swings behind.
+pub fn stride(c: &Creature, parts: &Parts, gait: Gait, fps: f64) -> Stride {
+    let (duty, offsets, froude, stride_in_hips, lift_in_hips, bob_in_hips, sway_deg) = gait.shape();
+    let rigs: Vec<LegRig> = parts.legs.iter().map(|l| leg_rig(c, l)).collect();
+    let hip = rigs.iter().map(|r| r.drop).sum::<f64>() / rigs.len() as f64;
+    let hip = hip.max(1e-6);
+    // The cadence comes from the gait and the leg (Froude number, stride
+    // in hip heights); what the legs can't reach is taken off the speed,
+    // not made up with quicker steps.
+    let full_speed = (froude * 9.81 * hip).sqrt();
+    let frames = ((stride_in_hips * hip / full_speed) * fps).round().max(8.0) as usize;
+    let period = frames as f64 / fps;
+    // The body rides a little low, so a leg has length to spare at both
+    // ends of its stance.
+    let crouch = 0.07 * hip;
+    let bob = bob_in_hips * hip;
+    let half_reach = rigs
+        .iter()
+        .map(|r| {
+            let h = (r.drop - crouch - bob).max(0.0);
+            (0.97 * r.reach).powi(2) - h * h
+        })
+        .fold(f64::INFINITY, f64::min)
+        .max(0.0)
+        .sqrt();
+    let stance = (duty * stride_in_hips * hip).min(2.0 * half_reach);
+    let speed = stance / (duty * period);
+    let half = 0.5 * stance;
+    let lift = lift_in_hips * hip;
+    let up = Vec3::new(0.0, 0.0, 1.0);
+    let swing_time = (1.0 - duty) * period;
+    let mut out = Vec::with_capacity(frames);
+    for f in 0..frames {
+        let t = f as f64 / frames as f64;
+        let mut p = Poser::new(c);
+        let sway = detmath::sin(TAU * t);
+        p.yaw_chain(&parts.spine, sway_deg * sway);
+        p.pitch_chain(&parts.neck, 3.0 * detmath::sin(2.0 * TAU * t));
+        p.yaw_chain(&parts.neck, -0.6 * sway_deg * sway);
+        for (i, &b) in parts.tail.iter().enumerate() {
+            let lag = i as f64 * 0.35;
+            p.yaw(
+                b,
+                12.0 / parts.tail.len() as f64 * detmath::sin(TAU * t - lag),
+            );
+        }
+        // Lowest as a pair of feet takes the weight, twice a cycle.
+        p.shift = up.scale(-crouch - bob * detmath::cos(2.0 * TAU * t));
+        let (mut quats, shift) = (p.quats, p.shift);
+        for (rig, off) in rigs.iter().zip(offsets) {
+            let phase = (t + off).fract();
+            let (along, height) = if phase < duty {
+                (half - stance * (phase / duty), 0.0)
+            } else {
+                // Leaves and lands moving back at the body's speed.
+                let u = (phase - duty) / (1.0 - duty);
+                let (u2, u3) = (u * u, u * u * u);
+                let slope = -speed * swing_time;
+                let x = (2.0 * u3 - 3.0 * u2 + 1.0) * -half
+                    + (u3 - 2.0 * u2 + u) * slope
+                    + (-2.0 * u3 + 3.0 * u2) * half
+                    + (u3 - u2) * slope;
+                (x, lift * 0.5 * (1.0 - detmath::cos(TAU * u)))
+            };
+            let contact = rig.contact + c.forward.scale(along) + up.scale(height);
+            solve_leg(c, rig, &mut quats, shift, contact);
+        }
+        out.push(make_frame(c, &quats, shift));
+    }
+    Stride {
+        clip: Clip {
+            fps,
+            skeleton: c.skeleton.clone(),
+            frames: out,
+        },
+        speed,
+        period,
+        duty,
+        stance,
     }
 }
 
@@ -639,13 +872,13 @@ mod tests {
     }
 
     #[test]
-    fn the_walk_loops_and_moves_every_leg_within_reason() {
+    fn the_walk_on_the_spot_loops_and_moves_every_leg_within_reason() {
         let c = dog();
         let p = parts(&c).unwrap();
-        let w = walk(&c, &p, 24, 24.0);
+        let w = walk_spot(&c, &p, 24, 24.0);
         assert_eq!(w.frames.len(), 24);
         // One more step of the same cycle lands on the first frame.
-        let again = walk(&c, &p, 24, 24.0);
+        let again = walk_spot(&c, &p, 24, 24.0);
         assert_eq!(w.frames[0].poses[5].quat, again.frames[0].poses[5].quat);
         for leg in &p.legs {
             let top = leg.bones[0];
@@ -668,6 +901,132 @@ mod tests {
                 .count()
         };
         assert!(w.frames.iter().all(|f| folded(f) <= 2));
+    }
+
+    /// The dog with its knees and hocks bent, as a real one stands: its
+    /// legs have length to spare, so a stride is not cut short.
+    fn bent_dog() -> Creature {
+        let mut c = dog();
+        for b in c.skeleton.bones.iter_mut() {
+            let knee = |v: &mut Vec3, back: f64| {
+                if (v.z - 0.30).abs() < 1e-9 {
+                    v.y += back;
+                } else if (v.z - 0.14).abs() < 1e-9 {
+                    v.y -= back * 0.8;
+                }
+            };
+            if b.name.starts_with("hind_") {
+                knee(&mut b.head, -0.07);
+                knee(&mut b.tail, -0.07);
+            } else if b.name.starts_with("front_") {
+                knee(&mut b.head, 0.05);
+                knee(&mut b.tail, 0.05);
+            }
+        }
+        c
+    }
+
+    /// Where a leg's paw stands, frame by frame, once the body is moved
+    /// forward at the stride's speed.
+    fn paw_track(c: &Creature, s: &Stride, leg: &Leg) -> Vec<Vec3> {
+        let paw = *leg.bones.last().unwrap();
+        s.clip
+            .frames
+            .iter()
+            .enumerate()
+            .map(|(f, frame)| {
+                let posed = fk(&c.skeleton, frame);
+                let len = c.skeleton.bone_length(paw);
+                let tail = posed[paw].head + posed[paw].rot.mul_vec(Vec3::new(0.0, len, 0.0));
+                tail + c.forward.scale(s.speed * f as f64 / s.clip.fps)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_planted_foot_stays_where_it_was_put() {
+        for gait in [Gait::Walk, Gait::Trot] {
+            let c = bent_dog();
+            let p = parts(&c).unwrap();
+            let s = stride(&c, &p, gait, 30.0);
+            let n = s.clip.frames.len();
+            assert!((s.period - n as f64 / 30.0).abs() < 1e-12);
+            assert!(s.stance > 0.15 * c.height, "{gait:?} stance {}", s.stance);
+            let (duty, offsets, ..) = gait.shape();
+            for (leg, off) in p.legs.iter().zip(offsets) {
+                let track = paw_track(&c, &s, leg);
+                let down: Vec<Vec3> = (0..n)
+                    .filter(|f| (*f as f64 / n as f64 + off).fract() < duty)
+                    .map(|f| {
+                        // Laps of the cycle put the spot a stride further on.
+                        let lap = ((f as f64 / n as f64 + off).floor()) * s.speed * s.period;
+                        track[f] - c.forward.scale(lap)
+                    })
+                    .collect();
+                assert!(down.len() >= 3);
+                let mean = down
+                    .iter()
+                    .fold(Vec3::ZERO, |a, b| a + *b)
+                    .scale(1.0 / down.len() as f64);
+                let slide = down
+                    .iter()
+                    .map(|d| (*d - mean).length())
+                    .fold(0.0, f64::max);
+                assert!(
+                    slide < 0.002 * c.height,
+                    "{gait:?}: a planted foot slides {slide} m"
+                );
+                // In the air it clears the ground, and never goes under it.
+                let rest_z = c.skeleton.bones[*leg.bones.last().unwrap()].tail.z;
+                let top = track.iter().map(|t| t.z).fold(f64::NEG_INFINITY, f64::max);
+                let low = track.iter().map(|t| t.z).fold(f64::INFINITY, f64::min);
+                assert!(
+                    top > rest_z + 0.03 * c.height,
+                    "{gait:?}: lifts {}",
+                    top - rest_z
+                );
+                assert!(low > rest_z - 0.002 * c.height);
+            }
+            // Bones keep their length: nothing is stretched to reach.
+            for frame in &s.clip.frames {
+                let posed = fk(&c.skeleton, frame);
+                for leg in &p.legs {
+                    for w in leg.bones.windows(2) {
+                        let rest =
+                            (c.skeleton.bones[w[1]].head - c.skeleton.bones[w[0]].head).length();
+                        let now = (posed[w[1]].head - posed[w[0]].head).length();
+                        assert!((rest - now).abs() < 1e-9);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_trot_is_faster_than_a_walk_and_pairs_its_diagonals() {
+        let c = bent_dog();
+        let p = parts(&c).unwrap();
+        let (w, t) = (
+            stride(&c, &p, Gait::Walk, 30.0),
+            stride(&c, &p, Gait::Trot, 30.0),
+        );
+        assert!(t.speed > 1.5 * w.speed && t.period < w.period);
+        // Hind left and front right step together in a trot.
+        let (hl, fr) = (paw_track(&c, &t, &p.legs[0]), paw_track(&c, &t, &p.legs[3]));
+        for (a, b) in hl.iter().zip(&fr) {
+            assert!((a.z - b.z).abs() < 0.01 * c.height);
+        }
+    }
+
+    #[test]
+    fn a_straight_legged_body_still_walks_with_short_steps() {
+        // The plain dog stands on straight legs: nothing to spare, so the
+        // stride shrinks instead of the legs stretching.
+        let c = dog();
+        let p = parts(&c).unwrap();
+        let s = stride(&c, &p, Gait::Walk, 30.0);
+        assert!(s.stance > 0.0 && s.stance < 0.5 * c.height);
+        assert!(s.clip.frames.len() >= 8);
     }
 
     #[test]
