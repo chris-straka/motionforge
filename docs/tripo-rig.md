@@ -51,6 +51,19 @@ says what failed. Exit 2: a step could not run.
 The best try is the one that passes, else the one with a clean contract
 and the fewest failing findings, then the highest score.
 
+## Creatures are rigged from their own body (2026-11-12)
+
+When skintokens' `creature-rig` is installed, a creature leaves this
+script after the clean step: `skintokens/tools/creature_route.py` reads
+the body's parts from the mesh (legs, arms, neck and head, tail, wings),
+lays a skeleton along them, weights it through the body, makes the walk
+and trot for a four-legged one, lets `weights fix` choose among its
+weights and the model's, and gates on the bend check, a skeleton check
+(every limb has a chain, bones inside the body, sides match) and rfcheck.
+Same outputs (`<name>.glb`, `<name>.sheet.png`, `report.json`). Steps 2 to
+5 above, the model's skeleton, remain as `--creature-route predicted`.
+Why and what it scored: skintokens `docs/creature-rig-log.md`.
+
 ## What it does on real models (2026-11-11)
 
 Eight Tripo exports, about 95,000 triangles each; three seeds; skintokens

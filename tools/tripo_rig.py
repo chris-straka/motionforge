@@ -8,6 +8,7 @@
         [--clips LIBRARY.glb [--pick walk=walk,attack_1=attack]]
         [--no-fix] [--fix-args "..."] [--keep-tries]
         [--unfuse [--unfuse-args "..."]]
+        [--creature-route auto|body|predicted]
 
 Steps, each a tool of its own:
 
@@ -20,6 +21,12 @@ Steps, each a tool of its own:
    animate`); a four-legged creature gets a walk and a lunge made on its
    own skeleton (`creature-profile`, `creature-gait`), and its range of
    motion written as a pose set.
+   A creature skips steps 2 to 5 as written here when skintokens'
+   `creature-rig` is installed: `skintokens/tools/creature_route.py`
+   takes over after the clean step and rigs it from its own body (its
+   parts read from the mesh, a skeleton along them, a skeleton check
+   beside the bend gate). `--creature-route predicted` keeps the model's
+   skeleton.
    With `--unfuse` (off by default) a human's rig is tried a second
    time with its legs cut apart: `meshkit/tools/unfuse.py` slits the lump
    that holds both thighs (a tunic or coat skirt, wide trousers, thighs
@@ -107,6 +114,10 @@ def main():
     ap.add_argument("--fix-args", default="")
     ap.add_argument("--fix-timeout", type=int, default=1800)
     ap.add_argument("--keep-tries", action="store_true")
+    ap.add_argument("--creature-route", default="auto", choices=["auto", "body", "predicted"],
+                    help="a creature's rig: body = skintokens' creature-rig (skeleton and weights read from the "
+                         "body), predicted = the model's skeleton (the steps below); auto = body when that tool is here")
+    ap.add_argument("--creature-rig", default="", help="path to creature-rig (default: $CREATURE_RIG_BIN, PATH, the sibling skintokens repo)")
     ap.add_argument("--unfuse", action="store_true",
                     help="a human: also try each rig with fused legs cut apart (meshkit tools/unfuse.py)")
     ap.add_argument("--unfuse-args", default="")
@@ -168,6 +179,30 @@ def main():
           f"{info['source_tris']} -> {info['tris']} tris; holes: {h.get('found', '?')} found, "
           f"{h.get('filled', 0)} filled, {h.get('left', '?')} left")
     save()
+
+    # A creature is rigged from its own body when skintokens' creature-rig
+    # is here: its parts read from the mesh, a skeleton laid along them,
+    # weights through the body, its own range of motion and skeleton check
+    # (skintokens `tools/creature_route.py`, same outputs as this script).
+    # The model's skeleton, the steps below, stays as `--creature-route
+    # predicted`.
+    if not human and a.creature_route != "predicted":
+        route = os.environ.get("CREATURE_ROUTE") or os.path.join(sib, "skintokens/tools/creature_route.py")
+        cr = (a.creature_rig or os.environ.get("CREATURE_RIG_BIN") or shutil.which("creature-rig")
+              or os.path.join(sib, "skintokens/target/release/creature-rig"))
+        if os.path.exists(route) and os.path.exists(cr):
+            cmd = [sys.executable, route, a.model, a.out, "--name", name, "--class", klass, "--clean-mesh", mesh,
+                   "--creature-rig", cr, "--skintokens", sk, "--motionforge", mf, "--weights", wf, "--rfcheck", rf,
+                   "--seed", (a.seeds.split(",")[0] or "1"), "--fix-timeout", str(a.fix_timeout)]
+            if a.no_fix:
+                cmd.append("--no-fix")
+            if a.fix_args:
+                cmd += ["--fix-args", a.fix_args]
+            if a.keep_tries:
+                cmd.append("--keep-tries")
+            return subprocess.call(cmd)
+        if a.creature_route == "body":
+            raise SystemExit(f"--creature-route body: creature_route.py or creature-rig not found ({route}, {cr})")
 
     def finish(t, base, std):
         """Clips, the check, the fix, the gate and the contract for one
