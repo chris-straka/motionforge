@@ -127,35 +127,46 @@ def setup(frame_pts, height, fwd):
     scn.world.color = (1, 1, 1)
     scn.display.shading.background_type = 'WORLD'
     d, up = camera_basis(fwd)
-    side = d.cross(up).normalized()
     c = sum(frame_pts, Vector()) / len(frame_pts)
-    xs = [(p - c).dot(side) for p in frame_pts]
-    zs = [p.z for p in frame_pts] + [0.0, height]
-    ext_x = max(xs) - min(xs) + 0.5 * height
-    ext_z = max(zs) - min(zs) + 0.15 * height
-    scale = max(ext_x, ext_z * W / H) * 1.05
-    mid_x = (max(xs) + min(xs)) / 2
+    c.z = 0.0
+    # Look down 15 degrees so the floor reads as a floor: a sunk foot is
+    # cut by it, a hovering one leaves a gap, a sliding one crosses lines.
+    el = math.radians(15)
+    view = (d * math.cos(el) + up * math.sin(el)).normalized()
     cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam"))
     scn.collection.objects.link(cam)
     cam.data.type = 'ORTHO'
-    cam.data.ortho_scale = scale
     cam.data.clip_end = 1000
-    target = c + side * mid_x
-    target.z = (max(zs) + min(zs)) / 2
-    cam.location = target + d * 20 * height + Vector((0, 0, 0.6 * height))
-    cam.rotation_euler = (target - cam.location).to_track_quat('-Z', 'Y').to_euler()
+    cam.data.sensor_fit = 'VERTICAL'
+    cam.rotation_euler = (-view).to_track_quat('-Z', 'Y').to_euler()
+    rot = cam.rotation_euler.to_matrix()
+    r_ax, u_ax = rot @ Vector((1, 0, 0)), rot @ Vector((0, 1, 0))
+    pts = list(frame_pts) + [p + Vector((0, 0, 0)) for p in frame_pts[:1]]
+    xs = [(p - c).dot(r_ax) for p in pts]
+    ys = [(p - c).dot(u_ax) for p in pts] + [(c - c).dot(u_ax)]
+    pad = 0.08 * height
+    x0, x1 = min(xs) - pad, max(xs) + pad
+    y0, y1 = min(ys) - pad, max(ys) + 2.2 * pad  # room for the label
+    scale = max(y1 - y0, (x1 - x0) * H / W)
+    cam.data.ortho_scale = scale
+    mid = c + r_ax * ((x0 + x1) / 2) + u_ax * ((y0 + y1) / 2)
+    cam.location = mid + view * 20 * height
     scn.camera = cam
-    bpy.ops.mesh.primitive_grid_add(x_subdivisions=80, y_subdivisions=80, size=8, location=(c.x, c.y, 0))
+    # Solid floor with a 10 cm grid on it.
+    bpy.ops.mesh.primitive_plane_add(size=12, location=(c.x, c.y, 0))
+    bpy.context.active_object.data.materials.append(mat("floor", (0.86, 0.86, 0.84, 1)))
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=120, y_subdivisions=120, size=12, location=(c.x, c.y, 0.001))
     grid = bpy.context.active_object
     wf = grid.modifiers.new("wf", 'WIREFRAME')
-    wf.thickness = 0.003
-    grid.data.materials.append(mat("grid", (0.72, 0.72, 0.78, 1)))
-    # Label, fixed to the camera's view.
+    wf.thickness = 0.0025
+    grid.data.materials.append(mat("grid", (0.6, 0.6, 0.66, 1)))
+    # Label, fixed to the camera's view (top left).
     txt = bpy.data.objects.new("label", bpy.data.curves.new("label", 'FONT'))
     scn.collection.objects.link(txt)
     txt.parent = cam
-    txt.data.size = scale * 0.045
-    txt.location = (-scale / 2 * 0.95, scale * H / W / 2 * 0.86, -1.0)
+    txt.data.size = scale * 0.05
+    hw = scale * W / H / 2
+    txt.location = (-hw * 0.94, scale / 2 * 0.92 - txt.data.size, -1.0)
     txt.data.materials.append(mat("ink", (0, 0, 0, 1)))
     return cam, txt, scale
 

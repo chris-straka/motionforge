@@ -21,12 +21,15 @@
 //!    frame count. A *big* segment (its top speed at least half the
 //!    clip's) gets anticipation: the pose eases `anticipation` of the way
 //!    *against* the coming move over `anticipation_frames`, holds `hold`
-//!    frames, then plays the source motion compressed into what is left
-//!    with ease-out-back (`overshoot`): it overshoots the arriving key
-//!    along the segment's own rotation and settles. Other segments hold
-//!    `hold` frames, then ease out. The source is resampled at the warped
-//!    time, so arcs and secondary motion survive; every bone uses the
-//!    same warp.
+//!    frames, then plays the source motion sped up evenly into what is
+//!    left (an eased warp skipped the arm's extremes inside a strike),
+//!    unwinding the counter pose as it goes. After a big segment the
+//!    next one starts with a moving hold: the pose carries on past the key
+//!    along the big segment's rotation (up to `0.1 * overshoot` of it)
+//!    and settles back over `hold + 2` frames. Other segments hold `hold`
+//!    frames, then ease out. The source is resampled at the warped time,
+//!    so arcs and secondary motion survive; every bone uses the same
+//!    warp.
 //! 4. **Exaggeration from the clip's own neutral.** Every frame's local
 //!    rotation is pushed away from the bone's mean rotation over the clip
 //!    (not the bind pose): `neutral * (neutral^-1 q)^factor`, ramped to
@@ -39,6 +42,7 @@
 //! (`stylize_glb`): plants found on the original clip stay where they
 //! were, with two-bone leg IK.
 
+use crate::detmath;
 use crate::glb::Document;
 use crate::math::{Quat, Vec3};
 use crate::rig::{Animation, Rig, Trs};
@@ -88,15 +92,6 @@ pub struct BodyReport {
 
 fn ease_out(u: f64) -> f64 {
     1.0 - (1.0 - u).powi(3)
-}
-
-fn ease_back(u: f64, strength: f64) -> f64 {
-    if strength <= 0.0 {
-        return ease_out(u);
-    }
-    let c1 = 1.70158 * strength;
-    let c3 = c1 + 1.0;
-    1.0 + c3 * (u - 1.0).powi(3) + c1 * (u - 1.0).powi(2)
 }
 
 fn smoothstep(x: f64) -> f64 {
@@ -268,16 +263,27 @@ pub fn stylize_body(
         keys: keys.clone(),
         ..Default::default()
     };
-    // Per output frame: (source time, anticipation weight, overshoot,
-    // segment start key, segment end key).
-    let mut plan: Vec<(f64, f64, f64, usize, usize)> = vec![(0.0, 0.0, 0.0, 0, 0); n];
+    // Per output frame: source time; anticipation weight and its segment;
+    // overshoot amount and the segment it overshoots.
+    struct Step {
+        src: f64,
+        anti: f64,
+        seg: (usize, usize),
+        over: f64,
+        over_seg: (usize, usize),
+    }
+    let mut plan: Vec<Step> = Vec::with_capacity(n);
+    let mut prev_big: Option<(usize, usize)> = None;
     for w in keys.windows(2) {
         let (k0, k1) = (w[0], w[1]);
         let len = k1 - k0;
         let peak = speed[k0..=k1].iter().cloned().fold(0.0, f64::max);
         let big = top > 0.0 && peak >= 0.5 * top;
         let a = p.anticipation_frames;
-        let room = big && p.anticipation > 0.0 && len >= a + p.hold + 2;
+        // Anticipation and its hold may take at most half the segment:
+        // squeezing a strike into the rest skips the source's extremes
+        // (a 7-frame overhead chop kept 2 frames and lost its top).
+        let room = big && p.anticipation > 0.0 && len >= 2 * (a + p.hold);
         if big && p.anticipation > 0.0 {
             if room {
                 report.counters_added += 1;
@@ -288,52 +294,61 @@ pub fn stylize_body(
         if big {
             report.big.push((k0, k1));
         }
+        // Moving hold after a big arrival: the pose carries on past the
+        // key along that segment's rotation and settles back.
+        let settle = p.hold + 2;
         for i in 0..len {
-            let g = k0 + i;
-            let mut anti = 0.0;
-            let mut over = 0.0;
-            let src;
-            if room {
-                if i < a {
-                    src = k0 as f64;
-                    anti = smoothstep(i as f64 / a as f64);
-                } else if i < a + p.hold {
-                    src = k0 as f64;
-                    anti = 1.0;
-                } else {
-                    let u = (i - a - p.hold) as f64 / (len - a - p.hold) as f64;
-                    let e = ease_back(u, p.overshoot);
-                    if e <= 1.0 {
-                        src = k0 as f64 + e * len as f64;
-                        anti = (1.0 - e).max(0.0);
-                    } else {
-                        src = k1 as f64;
-                        over = e - 1.0;
-                    }
-                }
-            } else {
-                let h = p.hold.min(len.saturating_sub(1));
-                if i < h {
-                    src = k0 as f64;
-                } else {
-                    let u = (i - h) as f64 / (len - h) as f64;
-                    let e = if big {
-                        ease_back(u, p.overshoot)
-                    } else {
-                        ease_out(u)
-                    };
-                    if e <= 1.0 {
-                        src = k0 as f64 + e * len as f64;
-                    } else {
-                        src = k1 as f64;
-                        over = e - 1.0;
-                    }
+            let mut step = Step {
+                src: k0 as f64,
+                anti: 0.0,
+                seg: (k0, k1),
+                over: 0.0,
+                over_seg: (k0, k1),
+            };
+            if let Some(pb) = prev_big {
+                if i < settle && p.overshoot > 0.0 {
+                    step.over = 0.1
+                        * p.overshoot
+                        * detmath::sin(std::f64::consts::PI * i as f64 / settle as f64);
+                    step.over_seg = pb;
                 }
             }
-            plan[g] = (src, anti, over, k0, k1);
+            if room {
+                if i < a {
+                    step.anti = smoothstep(i as f64 / a as f64);
+                } else if i < a + p.hold {
+                    step.anti = 1.0;
+                } else {
+                    // The strike: the source, sped up evenly (an eased
+                    // warp would skip the extremes inside it), unwinding
+                    // the counter pose as it goes.
+                    let u = (i - a - p.hold) as f64 / (len - a - p.hold) as f64;
+                    step.src = k0 as f64 + u * len as f64;
+                    step.anti = 1.0 - u;
+                }
+            } else {
+                let h = if big {
+                    p.hold.min(len / 4)
+                } else {
+                    p.hold.min(len.saturating_sub(1))
+                };
+                if i >= h {
+                    let u = (i - h) as f64 / (len - h) as f64;
+                    let e = if big { u } else { ease_out(u) };
+                    step.src = k0 as f64 + e * len as f64;
+                }
+            }
+            plan.push(step);
         }
+        prev_big = if big { Some((k0, k1)) } else { None };
     }
-    plan[n - 1] = ((n - 1) as f64, 0.0, 0.0, n - 1, n - 1);
+    plan.push(Step {
+        src: (n - 1) as f64,
+        anti: 0.0,
+        seg: (n - 1, n - 1),
+        over: 0.0,
+        over_seg: (n - 1, n - 1),
+    });
 
     let neutral: Vec<Quat> = (0..nb)
         .map(|b| mean_quat(&track.rot.iter().map(|fr| fr[b]).collect::<Vec<_>>()))
@@ -341,19 +356,20 @@ pub fn stylize_body(
     let ramp = params.end_ramp.max(1).min((n / 4).max(1));
     let mut rot = Vec::with_capacity(n);
     let mut loc = Vec::with_capacity(n);
-    for (g, &(src, anti, over, k0, k1)) in plan.iter().enumerate() {
+    for (g, st) in plan.iter().enumerate() {
+        let src = st.src;
         report.warp.push(src);
         let edge = g.min(n - 1 - g) as f64 / ramp as f64;
         let w_ex = smoothstep(edge);
         let mut fr = Vec::with_capacity(nb);
         for b in 0..nb {
-            let d = track.rot[k0][b].conj().mul(track.rot[k1][b]);
+            let delta = |(k0, k1): (usize, usize)| track.rot[k0][b].conj().mul(track.rot[k1][b]);
             let mut q = rot_at(track, b, src);
-            if anti > 0.0 {
-                q = q.mul(Quat::IDENTITY.slerp(d, -p.anticipation * anti));
+            if st.anti > 0.0 {
+                q = q.mul(Quat::IDENTITY.slerp(delta(st.seg), -p.anticipation * st.anti));
             }
-            if over > 0.0 {
-                q = q.mul(Quat::IDENTITY.slerp(d, over));
+            if st.over > 0.0 {
+                q = q.mul(Quat::IDENTITY.slerp(delta(st.over_seg), st.over));
             }
             let f = 1.0 + (track.factor[b] - 1.0) * w_ex;
             if (f - 1.0).abs() > 1e-12 {
@@ -577,13 +593,16 @@ pub fn stylize_glb(
                     .collect()
             })
             .collect();
+        // Translation channels for every node whose translation is not its
+        // rest one on some frame (moving, or held away from rest: dropping
+        // a held offset put the hips back at rest height).
         let moving: Vec<usize> = nodes
             .iter()
             .enumerate()
-            .filter(|(k, _)| {
+            .filter(|(k, &nd)| {
                 tracks[*k]
                     .iter()
-                    .any(|t| (t.t - tracks[*k][0].t).length() > 1e-9)
+                    .any(|t| (t.t - rig.rest[nd].t).length() > 1e-9)
             })
             .map(|(_, &nd)| nd)
             .collect();
@@ -909,10 +928,13 @@ mod tests {
         };
         let min = (k0..k1).map(|f| signed(rot[f][0])).fold(f64::MAX, f64::min);
         assert!(min < -0.6 - 0.2, "windup {min}");
-        // ...and the swing passes the arriving key before settling on it.
-        let max = (k0..k1).map(|f| signed(rot[f][0])).fold(f64::MIN, f64::max);
-        assert!(max > angles[k1] + 0.05, "overshoot {max}");
+        // ...arrives exactly on the key, then carries on past it and
+        // settles (the moving hold).
         assert!((signed(rot[k1][0]) - angles[k1]).abs() < 1e-9);
+        let max = (k1..k1 + 3)
+            .map(|f| signed(rot[f][0]))
+            .fold(f64::MIN, f64::max);
+        assert!(max > angles[k1] + 0.05, "overshoot {max}");
     }
 
     #[test]

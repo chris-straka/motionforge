@@ -292,16 +292,6 @@ impl Animation {
         locals
     }
 
-    /// The key times of the channel with the most keys (the clip's own
-    /// sampling), ascending.
-    pub fn key_times(&self) -> Vec<f64> {
-        self.channels
-            .iter()
-            .max_by_key(|c| c.times.len())
-            .map(|c| c.times.clone())
-            .unwrap_or_default()
-    }
-
     pub fn animated_nodes(&self) -> Vec<usize> {
         let mut out: Vec<usize> = self.channels.iter().map(|c| c.node).collect();
         out.sort_unstable();

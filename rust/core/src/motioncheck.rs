@@ -34,6 +34,7 @@
 //!   its peak speed, counted from the first such frame); root travel
 //!   (hips' horizontal start-to-end and furthest excursion).
 //!
+//! Clips are sampled at 30 fps (`--fps`), whatever they were keyed at.
 //! Distances are scaled by `k = height / 1.75 m` so one threshold fits a
 //! child and a giant. Deterministic: fixed frame order, no maps.
 
@@ -154,26 +155,14 @@ impl Subject {
     }
 }
 
-/// Sample a clip on its own key times when they are evenly spaced, else
-/// at `fps` (30 when none is given). Returns times and local poses.
+/// Sample a clip at `fps` (30 when none is given), the rate the renders
+/// and the game's own sampling use, whatever rate it was keyed at.
 pub fn sample(rig: &Rig, anim: &Animation, fps: Option<f64>) -> (Vec<f64>, Vec<Vec<Option<Trs>>>) {
-    let keys = anim.key_times();
-    let even = keys.len() >= 4 && {
-        let gaps: Vec<f64> = keys.windows(2).map(|w| w[1] - w[0]).collect();
-        let lo = gaps.iter().cloned().fold(f64::INFINITY, f64::min);
-        let hi = gaps.iter().cloned().fold(0.0, f64::max);
-        lo > 1e-6 && hi / lo < 1.02
-    };
-    let times: Vec<f64> = match (fps, even) {
-        (None, true) => keys,
-        _ => {
-            let fps = fps.unwrap_or(30.0);
-            let n = ((anim.duration * fps).round() as usize).max(1) + 1;
-            (0..n)
-                .map(|f| anim.duration * f as f64 / (n - 1).max(1) as f64)
-                .collect()
-        }
-    };
+    let fps = fps.unwrap_or(30.0);
+    let n = ((anim.duration * fps).round() as usize).max(1) + 1;
+    let times: Vec<f64> = (0..n)
+        .map(|f| anim.duration * f as f64 / (n - 1).max(1) as f64)
+        .collect();
     let frames = times.iter().map(|&t| anim.sample(rig, t)).collect();
     (times, frames)
 }

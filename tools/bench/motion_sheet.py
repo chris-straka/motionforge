@@ -63,13 +63,14 @@ def render(spec, tmp):
     json.dump(spec, open(path, "w"))
     p = subprocess.run([blender(), "-b", "--factory-startup", "--python",
                         os.path.join(HERE, "motion_render.py"), "--", path],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if "MOTION_RENDER" not in p.stdout:
         sys.exit(p.stdout[-3000:] + p.stderr[-3000:])
 
 
 def ff(*args):
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *args], check=True)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-nostdin", *args], check=True,
+                   stdin=subprocess.DEVNULL)
 
 
 def main():
