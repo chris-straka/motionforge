@@ -47,8 +47,9 @@ fn flat(v: Vec3) -> Vec3 {
     Vec3::new(v.x, 0.0, v.z)
 }
 
-/// Frame intervals `[a, b)` where the source foot is planted.
-fn plants(ankle: &[Vec3], times: &[f64], leg_len: f64) -> Vec<(usize, usize)> {
+/// Frame intervals `[a, b)` where the source foot is planted (ankle near
+/// its lowest height in the clip and nearly still).
+pub fn plants(ankle: &[Vec3], times: &[f64], leg_len: f64) -> Vec<(usize, usize)> {
     let n = ankle.len();
     if n < PLANT_MIN_FRAMES {
         return Vec::new();

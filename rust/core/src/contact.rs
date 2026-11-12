@@ -1692,6 +1692,48 @@ fn measure(
     (count, worst, names)
 }
 
+/// Read-only contact check of one arm over a clip (no fix): what
+/// `motion check` reports. Proxy contacts and the exact mesh check, the
+/// same measures `fix_clip` reports as "before".
+#[derive(Clone, Debug, Default)]
+pub struct ArmCheck {
+    pub side: String,
+    pub proxy_frames: usize,
+    pub proxy_depth: f64,
+    /// Per frame: an arm vertex or blade point inside the body (beyond rest).
+    pub mesh_inside: Vec<bool>,
+    pub mesh_depth: f64,
+    /// Frame of the deepest mesh contact.
+    pub worst_frame: usize,
+    pub contacts: Vec<String>,
+}
+
+/// [`ArmCheck`] for every arm; `weapon` adds the blade proxy where the
+/// weapon arm has one.
+pub fn check_frames(
+    body: &Body,
+    rig: &Rig,
+    frames: &[Vec<Option<Trs>>],
+    weapon: bool,
+) -> Vec<ArmCheck> {
+    (0..body.arms.len())
+        .map(|ai| {
+            let use_weapon = weapon && body.arms[ai].weapon.is_some();
+            let (pf, pd, contacts) = measure(body, ai, rig, frames, use_weapon);
+            let (inside, md, at) = mesh_measure(body, ai, rig, frames, use_weapon);
+            ArmCheck {
+                side: body.arms[ai].side.clone(),
+                proxy_frames: pf,
+                proxy_depth: pd,
+                mesh_inside: inside,
+                mesh_depth: md,
+                worst_frame: at,
+                contacts,
+            }
+        })
+        .collect()
+}
+
 /// Debug: posed capsules of every frame, as JSON
 /// `[[{"name", "a", "b", "r"}...] per frame]` in glTF world space.
 pub fn dump_posed(body: &Body, rig: &Rig, frames: &[Vec<Option<Trs>>], weapon: bool) -> Json {
