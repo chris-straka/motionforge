@@ -5,6 +5,11 @@ Every numeric claim in these docs, with the command behind it. All run
 build unless noted. Fixture paths are `tests/fixtures/`; goldens pin
 the CLI outputs byte-for-byte.
 
+## Motion check and body stylizer (2026-11-12)
+
+See `docs/motion-check.md` (known-answer tests, the game's 31 clips
+scored) and `docs/stylizer.md` (body mode, the three-attack test).
+
 ## GLB rig adapters (2026-10-05)
 
 See `docs/adapters.md` (measurements section): 10 rig-adapter + 3

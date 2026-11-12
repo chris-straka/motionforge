@@ -1,11 +1,123 @@
 # Motion stylizer (P2)
 
 Realistic clip in, snappy game motion out. Pure curve math, no
-training. The operator exports the active action, runs `motionforge
-stylize`, and imports the result as `<action>_stylized` (dense editable
-keys; the report lists the sparse key frames each bone kept).
+training. Two ways in:
 
-## Pipeline (per bone, independently)
+- **On a rigged GLB** (the path the game's clips take, after
+  `animate`): `motionforge stylize --input hero.glb --output out.glb
+  [--clip attack_1] [--suffix _new]`. Default `--mode body` (below);
+  `--mode per-bone` runs the original algorithm unchanged.
+- **On clip JSON** (the Blender operator): exports the active action,
+  runs `motionforge stylize`, imports `<action>_stylized`. Per-bone only
+  (`--mode body` needs the rigged GLB: it reads the skeleton's world
+  positions and re-plants the feet).
+
+## Body mode (default on GLBs, 2026-11-12)
+
+Per-bone keys put every bone on its own clock: the arm reaches its
+extreme on frame 9, the spine on 11, the hips on 7, so the body never
+holds a pose as a whole and the easings overlap: attacks read rubbery.
+Body mode (`rust/core/src/stylize_body.rs`):
+
+1. **Body speed**: per frame, the summed speed of the hands, forearms,
+   feet, shins, chest and head relative to the hips, plus the hips' own
+   speed; smoothed [1,2,1]/4.
+2. **Shared keys**: the ends, plus every speed minimum (the body at an
+   extreme or turning around) whose dip is at least `--key-prominence`
+   (0.25) of the lower of the speeds on its two sides, in motion faster
+   than 5% of the clip's top speed, `--min-spacing` apart, each moved to
+   the slowest unsmoothed frame next to it.
+3. **One clock**: each segment between keys keeps its frame count. A
+   big segment (top speed at least half the clip's) eases the whole pose
+   `--anticipation` of the way back against the coming move over
+   `--anticipation-frames`, holds `--hold` frames, then plays the source
+   motion sped up evenly into the rest, unwinding the counter pose
+   (only when anticipation and hold take at most half the segment;
+   otherwise it holds a quarter of it at most and plays the rest). The
+   next segment starts with a moving hold: the pose carries on past the
+   key along the strike's rotation (up to `0.1 * --overshoot` of it) and
+   settles over `--hold + 2` frames. Other segments hold, then ease out.
+   The source is resampled at the warped time (arcs and secondary motion
+   survive); every bone uses the same warp, so holds and overshoots land
+   on shared frames. (A first version eased the strike with
+   ease-out-back like the per-bone mode; on the real attacks that warp
+   jumped over the arm's widest point in the first strike frame and the
+   swing's arc came out narrower than the source's.)
+4. **Exaggeration from the clip's own neutral**: each bone's rotation is
+   pushed away from its mean over the clip (not the bind pose),
+   `neutral * (neutral^-1 q)^factor`, ramped to none over the first and
+   last 4 frames so the clip still starts and ends on its own poses.
+5. **Feet re-planted**: plants found on the original clip (ankle near its
+   lowest and nearly still, as `animate`'s foot pinning finds them)
+   follow the warp; inside one, the ankle goes back to the original's
+   position at that source time and the foot to its rotation, by leg IK,
+   eased over 3 frames (`--no-replant` to skip).
+
+Translations follow the warp (no exaggeration or overshoot), so root
+travel ends where it ended. Body mode is for attacks and other one-off
+moves: on an in-place walk whose stance foot slides (the procedural
+fixture walk), there are no plants to keep, and exaggerating the legs
+lifts both feet off the floor on 21 of 31 frames, up to 47 cm
+(`core/tests/motion_check.rs`). Unit tests (`stylize_body::tests`): keys land
+on a synthetic attack's windup and strike extremes (within the one frame
+30 fps sampling allows); identity settings reproduce the source on keys;
+two bones with different extremes freeze on the same frames; the strike
+gets a deeper windup and an overshoot that settles exactly on its key;
+exaggeration widens a wiggle about its own middle instead of doubling its
+offset from rest. `core/tests/motion_check.rs` runs both modes on a GLB.
+
+## Real test: the hero's three attacks (2026-11-12)
+
+The game's own sword attacks on the hero's rig (hand-keyed at 24 fps,
+0.67-0.83 s), each stylized both ways with default settings, then scored
+with `motion check` (`docs/motion-check.md`) and rendered as one
+side-by-side reel and an 8-frame strip per attack (kept with the game's
+files, not in this repo). Commands: `stylize --mode per-bone --suffix
+_old`, then `stylize --mode body --suffix _new`, on f.
+
+| clip | skate frames / cm | through body frames / deepest | arm jerk mean | windup / strike / hold |
+|---|---|---|---|---|
+| attack_1 original | 86% / 13.6 | 21 / 4.4 cm | 3,650 | 0.13 s / 0.10 s / 3 fr |
+| attack_1 old | 48% / 8.9 | 21 / 9.1 cm | 10,980 | 0.03 / 0.07 / 0 |
+| attack_1 new | 43% / 8.6 | 21 / 8.6 cm | 10,890 | 0.03 / 0.03 / 1 |
+| attack_2 original | 86% / 13.6 | 21 / 3.3 cm | 3,150 | 0.13 / 0.13 / 2 |
+| attack_2 old | 48% / 8.9 | 21 / 8.8 cm | 14,350 | 0.00 / 0.03 / 2 |
+| attack_2 new | 43% / 9.0 | 21 / 13.1 cm | 10,050 | 0.07 / 0.07 / 4 |
+| attack_3 original | 88% / 27.4 | 4 / 2.2 cm | 2,070 | 0.13 / 0.10 / 14 |
+| attack_3 old | 27% / 6.0 | 4 / 4.1 cm | 7,560 | 0.00 / 0.03 / 0 |
+| attack_3 new | 42% / 16.4 | 9 / 2.4 cm | 4,970 | 0.23 / 0.10 / 4 |
+
+By eye (the strips and reels):
+
+- **Old (per-bone)** breaks every attack: exaggerating from the bind pose
+  lifts the sword arm to the head in attack_1 and wraps it round the head
+  in attack_2; attack_3 never raises its arms overhead and kicks a leg
+  out. Its lower skate is the legs being pushed elsewhere, not better
+  feet.
+- **New (body)** keeps each attack's shape and arc. Its one clear gain
+  is attack_3: it holds the overhead windup a few frames longer before
+  the chop (a held load, the "weight" the original lacks). In attack_1
+  and attack_2 it mostly shifts timing and sharpens the corners of the
+  hand's path; exaggeration pushes the sword forearm deeper through the
+  chest (attack_2: 13.1 cm against 3.3).
+- **The original still reads best** on attack_1 and attack_2: they are
+  already fast, keyed snaps (hand 12-13 m/s), and both stylizers mostly
+  add roughness. New beats old on all three.
+
+Where the numbers and the eye disagree: jerk calls new as rough as old,
+but by eye new is far cleaner (jerk counts the deliberate snap of a
+faster strike as roughness); skate says both stylized versions beat the
+original, which at strip scale I cannot see; the attack timing numbers
+are noisy on 21-frame clips (one frame is 0.03 s), so "windup 0.03 s"
+means "no windup the score could find", not a measured improvement.
+
+Next, if the stylizer is to win on these clips: exaggerate arms against
+the contact proxies (stop at the body instead of through it), scale
+exaggeration by how fast a clip already is, and pick keys from the weapon
+hand's extremes as well as the whole body's (the body's speed minima
+missed the arm's widest point in attack_1).
+
+## Per-bone mode (the original; `--mode per-bone`, clip JSON)
 
 Steps 3-5 act on rotations only. Locations carry root travel and pass
 through unchanged, frame for frame (see "Root travel" below).

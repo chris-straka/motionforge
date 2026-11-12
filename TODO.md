@@ -46,6 +46,12 @@ numbers and commands in `docs/measurements.md`.
 
 ## Next code tasks (agent-ready)
 
+- [ ] Motion check / stylizer follow-ups (2026-11-12, `docs/motion-check.md`,
+      `docs/stylizer.md`): skate for in-place locomotion needs the game's
+      travel speed added; a jitter measure that does not rank fast moves
+      as rough; body-mode exaggeration should stop at the contact proxies
+      and take keys from the weapon hand's extremes too.
+
 - [ ] Contact pass v2 (`docs/contact.md` limits): upper arm (armpit) and
       leg proxies, other-arm contact, a blade proxy for drawn-weapon
       locomotion.
