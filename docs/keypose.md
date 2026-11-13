@@ -90,6 +90,9 @@ Name the clip with an attack word (`cut`, `attack`, `slash` ...) so
    key's rear foot anchors, the other lifts and arcs 7 cm, down on the
    key (a step into a strike starts in the load's hold). The hips come
    down where a leg cannot reach its mark, spread over neighbouring frames.
+5. **Pick the follow-through** (`--carry auto`): the clip is built with
+   the drawn follow-through and with it carried on along the strike, and
+   the one that reads best at the game camera is written (below).
 
 ## Numbers
 
@@ -127,17 +130,38 @@ the right foot forward, its strike with the left forward). Fitted blades
 are within 1.3 degrees of the drawn blades; the off fist on the grip
 within 7.8 cm (cut left strike), else 0.
 
-`motion check` on Andras's rig (2 m), the keypose clips beside the
-game's attacks and the Kimodo clips made from the same drawings
-(`bench/keypose/motion_check.txt`):
+`motion check --camera game` on Andras's rig (2 m), the keypose clips
+beside the game's attacks and the Kimodo clips made from the same
+drawings (`bench/keypose/motion_check.txt`). *read* is the game-camera
+read score (`docs/motion-check.md`: body change, blade sweep, tip arc,
+held load against readable references, 0..1):
 
-| clip | frames | skate | sink | through body | limits | windup / strike / hold | tip peak | contrast |
+| clip | frames | skate | sink | through body | limits | windup / strike / hold | tip peak | read (body / sweep / arc) |
 |---|---|---|---|---|---|---|---|---|
-| kp_cut_right | 36 | 0% | 0 cm | 23 fr, 11.7 cm | 4 fr, worst 5 deg | 0.20 s / 0.10 s / 9 fr | 48.5 m/s | 53.1 deg |
-| kp_cut_left | 36 | 0% | 0 cm | 30 fr, 8.3 cm | 1 fr, worst 1 deg | 0.20 s / 0.10 s / 9 fr | 41.2 m/s | 55.9 deg |
-| attack_1 | 21 | 86% | 4.8 cm | 21 fr, 4.4 cm | 0 | 0.13 s / 0.10 s / 3 fr | 40.6 m/s | 29.2 deg |
-| attack_3 | 26 | 88% | 10.8 cm | 4 fr, 2.2 cm | 0 | 0.13 s / 0.10 s / 14 fr | 45.5 m/s | 54.5 deg |
-| sf_cut_right (Kimodo) | 31 | 26% | 89 cm | 25 fr, 13.3 cm | 3 fr, 7 deg | 0.20 s / 0.30 s / 1 fr | 24.1 m/s | 64.5 deg |
+| kp_cut_right | 36 | 0% | 0 cm | 20 fr, 10.2 cm | 4 fr, worst 5 deg | 0.20 s / 0.10 s / 1 fr | 48.3 m/s | **0.53** (0.79 / 0.19 / 1.79) |
+| kp_cut_left | 36 | 0% | 0 cm | 23 fr, 8.3 cm | 1 fr, worst 1 deg | 0.23 s / 0.10 s / 10 fr | 41.6 m/s | **0.43** (0.84 / 0.13 / 1.12) |
+| attack_1 | 21 | 86% | 4.8 cm | 21 fr, 4.4 cm | 0 | 0.13 s / 0.10 s / 3 fr | 40.6 m/s | 0.37 (0.26 / 0.37 / 1.28) |
+| attack_3 | 26 | 88% | 10.8 cm | 4 fr, 2.2 cm | 0 | 0.13 s / 0.10 s / 14 fr | 45.5 m/s | 0.49 (0.39 / 0.33 / 1.96) |
+| sf_cut_right (Kimodo) | 31 | 26% | 89 cm | 25 fr, 13.3 cm | 3 fr, 7 deg | 0.20 s / 0.30 s / 1 fr | 24.1 m/s | 0.75 (0.73 / 0.84 / 2.18) |
+| sf_cut_left (Kimodo) | 31 | 58% | 93 cm | 27 fr, 13.4 cm | 3 fr, 1 deg | 0.27 s / 0.20 s / 0 fr | 21.3 m/s | 0.35 (0.73 / 0.12 / 0.49) |
+
+The follow-through carry (`--carry auto`): the drawn follow-throughs
+pull the hands back in after the contact, so the blade tip's path hooks
+(arc consistency 0.32 on the right cut, 0.53 on the left). Carrying the
+upper body on along the strike (each bone's load-to-strike turn
+continued by 35%, blended with the drawn follow-through; legs, hips and
+the off arm kept; elbows, torso, head and wrists brought back into their
+limits) straightens it. Read at the game camera, carry 0 / 0.5 / 1: right
+0.38 / 0.41 / 0.53, left 0.39 / 0.36 / 0.43; auto keeps 1 on both (a
+carried follow-through must read 0.02 better than the drawn one). By eye
+(`attacks_reel.mp4`) the right cut's carried follow-through ends with
+the blade hanging straight down in front, hands at the chest: it reads
+as a finished cut but is less like the drawing than carry 0.
+
+What still keeps the read down: the sweep. Seen from behind, a
+two-handed cut in front of the body covers little screen (0.13-0.19
+against the 0.8 a readable reference reaches); the Kimodo right cut's
+blade swings wide to the side (0.84).
 
 Feet modes on the right cut (skate / root jerk mean / steps):
 `hold` 0% / 1150 / 2 steps of 121 cm; `order` 0% / 1582 / 4 steps
@@ -145,7 +169,7 @@ Feet modes on the right cut (skate / root jerk mean / steps):
 frames. `hold` is the default; `order` stays for sheets whose figures
 step on purpose.
 
-Back-and-forth (`rough`) peaks at 240 mm on the arms at the strike
+Back-and-forth (`rough`) peaks at 146-268 mm on the arms at the strike
 (frames 14-16): the coil's reversal into the strike and the contact.
 The reel shows no zigzag there (one wind back, one cut); the measure
 counts any single acceleration reversal, so a deliberate anticipation

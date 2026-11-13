@@ -321,8 +321,14 @@ and draw the fit back over the pictures). How and every number:
 - Made the two diagonal two-handed cuts from HLH's drawn sheets
   (`kp_cut_right`, `kp_cut_left`, 36 frames): no skate, no sink, limits
   4 and 1 frames (worst 5 deg), windup 0.20 s, strike 0.10 s, tip 41-49
-  m/s, held 9 frames. The game's attack_1 and attack_3 skate 86-88% and
-  sink 5-11 cm; the Kimodo clips made from the same drawings sink 89 cm.
+  m/s. The game's attack_1 and attack_3 skate 86-88% and sink 5-11 cm;
+  the Kimodo clips made from the same drawings sink 89-93 cm.
+- Read at the game camera (the new `motion check --camera game`): right
+  cut 0.53, left 0.43; attack_1 0.37, attack_3 0.49, Kimodo 0.75 / 0.35.
+  The drawn follow-throughs pull the hands back (the tip's path hooks:
+  0.38 / 0.39); `--carry auto` carries the upper body on along the strike
+  when that reads better (it did on both). Still low: the sweep (a cut in
+  front of the body covers little screen seen from behind).
 - Tried and kept as options: fitting a turn between the views (worse
   than none on these sheets), feet as drawn (5 steps up to 2.2 m: the
   drawings swap which foot is in front) and per-key stances (4 steps).
