@@ -133,3 +133,34 @@ Not on by default yet: through-body frames 895 -> 229 (deepest sum
 over the set, and in `hit` the sword hand is held off the body where the
 move swings it across. Next: let a correction move the elbow (not only
 the wrist) for forearm-through-chest, and judge `hit` with the owner.
+
+## 2026-11-13, round 2: the stylizer on the game's attacks
+
+Eleven attack clips (attack_1-3, quirin-attack_1-3, enemy-attack_1-3,
+sf_cut_left/right), from the cleaned set, stylized with round 1's body
+mode (`--snap-speed 0 --accent none`) and with this round's (the sword
+hand's stops are keys too; exaggeration scaled by `6 m/s / hand peak`,
+x0.41-0.94 on these clips).
+
+| measure (sum over 11 clips) | original | round 1 | round 2 |
+|---|---|---|---|
+| skate cm | 4.6 | 50.0 | 39.7 |
+| floating frames | 8 | 55 | 35 |
+| through-body frames | 361 | 426 | 419 |
+| back-and-forth mm | 9.3 | 236.4 | 200.0 |
+| joint-limit frames | 32 | 197 | 180 |
+| key-pose contrast deg (mean) | 45.2 | 46.3 | 44.9 |
+
+attack_1's windup by the numbers: 0.13 s original, 0.03 round 1, 0.23
+round 2. By eye (painted reel with the hand's path, `attack_1_stylized`):
+the original's windup swings the arm wide to the right (frame 6); both
+stylized versions keep the hand by the body there, so the backswing reads
+smaller, and the hand's path gains corners. **Kept** over round 1's
+settings (better on every defect), **not for the game**: the original
+clips still read best and score far smoother. The stylizer stays opt-in
+(`stylize`, `animate --stylize`).
+
+Next: find the back-and-forth in the stylized clips (hold-to-strike
+corners in the time warp, and the re-plant moving ankles up to 25 cm);
+keep the source's widest windup pose as the anticipation instead of a
+counter-rotation from the key.
