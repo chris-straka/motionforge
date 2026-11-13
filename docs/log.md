@@ -201,3 +201,67 @@ spikes (quirin-attack_2 652 mm at frame 14, attack_1 284 at 6: the
 hold-to-strike corner of the time warp), then `--stylize auto`: stylize a
 clip only where its defects stay within the original's and its windup or
 hold grows, and report per clip which won.
+
+## 2026-11-13: videos at the game camera, and a readability measure
+
+The owner on the old strips: "In pic 2 I have no idea what he's doing,
+is that an attack animation? If so, it fails completely." "The sword
+model in pic 2 is bad." "Shadows ... are wild." "Wouldn't video be
+better for me to evaluate?"
+
+**Videos** (`tools/bench/motion_video.py`, kept): MP4 panels at HLH's
+follow camera (3.0 m behind, focus 1.535 m up, pitch -18.3 deg, 75 deg
+vertical; `docs/motion-check.md` has the sources), EEVEE, painted, plain
+floor, one soft sun. On the grafted Andras (the starred head on the
+travel body, 1.0 m tall in its GLB, shown at the game's 2 m by moving
+the camera) with the game's clips put on by `motionforge animate
+--no-contact`, and the props kit's sword held as the game holds its
+blade (`tracks::held_pose`). Checked by eye: the grip is in the right
+hand and the blade comes out of the fist in idle and through the
+attacks; laid along the socket's +Y instead, the blade crosses his body.
+The grafted rig has no finger animation, so the hand stays open round
+the grip. Scaling the imported armature broke its skinning in Blender
+(the arms stayed in the rest pose); moving the camera instead does not.
+
+**Read at the game camera** (`motion check --camera game`, kept). First
+cut: pose change against the idle, blade sweep, tip arc, held load.
+Two disagreements with the pictures, fixed in the benchmark:
+
+- Against the idle's silhouette, the CC0 Sword_Idle scored 0.54 (its
+  stance differs from an idle); the neutral is now the clip's own first
+  frame (0.15).
+- The pose change counted the blade, so a thin blade sweeping across a
+  still body scored like a whole-body move. By eye at the game camera
+  attack_1 is only the arm and blade crossing at shoulder height over an
+  upright, unchanged body; attack_3 raises both arms and steps into a
+  chop; the CC0 Sword_Attack crouches, twists and swings high overhead.
+  The score now uses the body alone ("body change").
+
+Also: the held load counts only as far as an arc follows it (idle and
+other still clips "held" all clip long), and turns on the tip path are
+weighted by step length (slow jitter at the ends is not a wiggle).
+
+| clip | read | body | sweep | arc | held load |
+|---|---|---|---|---|---|
+| CC0 Sword_Attack (reference) | 0.58 | 0.69 | 0.55 | 1.30 | 0 |
+| CC0 Sword_Regular_B | 0.54 | 0.56 | 0.34 | 1.82 | 0 |
+| quirin-attack_2 | 0.66 | 0.87 | 0.51 | 2.15 | 0 |
+| quirin-attack_3 | 0.62 | 0.55 | 0.80 | 1.43 | 0 |
+| quirin-attack_1 | 0.60 | 0.71 | 0.65 | 0.96 | 1 |
+| enemy-attack_2 | 0.59 | 0.69 | 0.47 | 1.62 | 0 |
+| attack_3 | 0.49 | 0.40 | 0.35 | 1.93 | 0 |
+| attack_2 | 0.48 | 0.31 | 0.52 | 1.66 | 0 |
+| attack_1 | 0.42 | 0.29 | 0.38 | 1.59 | 0 |
+| enemy-attack_1 | 0.41 | 0.54 | 0.36 | 0.86 | 0 |
+| enemy-attack_3 | 0.31 | 0.37 | 0.38 | 0.36 | 1 |
+| idle | 0.04 | 0.07 | 0.01 | 0.03 | (28, not counted) |
+
+Command: `motionforge motion check <grafted>.glb --camera game --json`
+(and the same on the CC0 Quaternius UAL clips put on the same body).
+The ranking the owner asked for holds: a clearly readable attack (the
+CC0 reference 0.58, attack_3 0.49) above attack_1 (0.42) above idle
+(0.04). What it says about the game: Andras's three attacks move the
+body less than any other attack in the set (0.29-0.40 against 0.54-0.88
+for Quirin's, the husk's and the CC0 ones); none of the attacks, the CC0
+ones included, holds its load a beat. Not yet checked against the
+owner's own picks.

@@ -96,11 +96,61 @@ and a giant and numbers compare across characters.
   counted from the first such frame. **Root**: the hips' horizontal
   start-to-end travel and furthest excursion.
 
+- **Read at the game camera** (2026-11-13, `--camera game`;
+  `rust/core/src/readcam.rs`). The owner's question: can a viewer tell
+  an attack from the silhouette, seen from where the player sees him?
+  Per frame the skinned body and the blade are projected through HLH's
+  follow camera and filled into a 480x270 mask (the game's 1280x720 at
+  three eighths). The camera: focus 1.535 m up (0.535 m over the body's
+  centre, 1.0 m over the feet), 3.0 m back at pitch -0.32 rad (-18.3
+  deg), straight behind him, 75 deg vertical field of view (HLH
+  `bevy/src/fx.rs` `camera_follow` in source levels, `Fence::distance`
+  default, `rig.pitch` at spawn; the game records the same numbers in
+  `proportions.rs`). He is scaled to the game's 2 m (head joint at
+  1.6836 m, `character.rs` `RigRest::stature`; `--stature`). The blade is
+  a 5 cm ribbon from the guard (0.11 m) to the tip (0.91 m, the props
+  kit's sword; `--blade-length`) held as the game holds it
+  (`tracks::held_pose`: grip 4 cm up and 8.5 cm back in the socket, the
+  blade cocked off the socket's +Y; `--blade-pose socket` for straight
+  out along +Y). The strike's frames are the attack timing's (peak,
+  load, windup start); the *settle* is the first frame after the peak
+  with the tip under 15% of its peak speed. Parts:
+  - *body change*: the largest `1 - IoU` of the body alone (no blade)
+    against the clip's first frame, from the windup's start to the
+    settle: does the body take part? (*pose change*, reported too, is
+    the same with the blade, over load to settle.)
+  - *sweep*: the area the blade covers over load to settle, over the
+    first frame's body area.
+  - *arc*: the tip's screen path over load to settle in body heights,
+    times its turn consistency (`|sum of signed turns| / sum of turns`,
+    each turn weighted by its shorter step; 1 for an arc or a straight
+    cut, 0 for a zigzag).
+  - *load hold*: the longest run of frames in the second before the peak
+    whose silhouette changes under 4% from the frame before.
+  - *score*: each part over what the readable references reach (body
+    0.7, sweep 0.8, arc 2.0, hold 4 frames), capped at 1, averaged; the
+    hold counts only as far as the arc reads (idle holds still all
+    clip long).
+  `--silhouettes DIR` writes each frame's mask as a PGM (body black,
+  blade grey).
+
 Clips are sampled at 30 fps whatever rate they were keyed at (`--fps`
 to change), the rate the renders use, so frame numbers match the
 pictures. Output is deterministic.
 
 ## Tests with known answers
+
+`rust/core/tests/readcam.rs` (2026-11-13): a triangle fills exactly the
+55 pixel centres inside it, either winding; a 6x4 px thick segment is 24
+pixels; two 4x4 squares 2 px apart have IoU 1/3; a 90 deg camera 100 px
+high has a 50 px focal length and puts a point 1 m up and right at 2 m
+25 px off centre; the game camera's eye is `3 sin 0.32` up and `3 cos
+0.32` behind the focus, which lands on the centre; half a circle in 20
+steps is `20 * 2r sin(4.5 deg)` long with consistency 1 and 171 deg of
+turn, a zigzag of eight equal turns has consistency 0, a straight cut 1;
+the strike timing on the synthetic swing below; on the fixture
+humanoid, standing still has no pose or body change and no arc, an arm
+swung up 150 deg reads higher, the same twice byte for byte.
 
 2026-11-13 additions: back-and-forth on the same +-0.02 rad forearm
 jitter is exactly `4 L sin(theta)` at its peak (half that as the chain
@@ -142,7 +192,27 @@ python3 tools/bench/motion_sheet.py strip OUT.png 'a=hero.glb:attack_1@10,11,12!
 python3 tools/bench/motion_sheet.py reel OUT.mp4 'orig=x.glb:attack_1' 'new=x.glb:attack_1_new' --trail DEF-hand.R \
     --prop sword.glb@Socket_Hand_R
 python3 tools/bench/motion_compare.py base=before.json new=after.json [--suffix _new]
+motionforge motion check hero.glb --camera game --json > check.json   # + read_cam per clip
+python3 tools/bench/motion_video.py OUT.mp4 'attack_1=hero.glb:attack_1' 'attack_3=hero.glb:attack_3' \
+    --cam game --prop sword.glb@Socket_Hand_R --prop-pose game --marks check.json --cols 2
 ```
+
+**Videos at the game camera** (2026-11-13; the owner: "Wouldn't video
+be better for me to evaluate?"): `motion_video.py` renders each row as
+a panel at HLH's follow camera (the numbers above; `--cam lock` is the
+locked-on camera over his right shoulder, `--cam close` a 3/4 front
+view framing the whole clip with a 34 deg lens), EEVEE with the
+character's own materials, a plain floor, one soft sun (55 deg up, 45
+deg left of the view, 3 deg wide) and sky light, so the shadow falls
+short beside him; `--engine workbench` where EEVEE will not run. Panels
+play in step: twice at game speed, then once at half speed (marked
+"x0.5 speed"); `--marks` takes `motion check --json` and labels the
+load and strike frames. The prop's origin is its grip (the props kit's
+convention) and it is held as the game holds the sword (`--prop-pose
+game`; `socket` lays the blade along the socket's +Y, which on HLH's
+rigs crosses the body). The camera is moved, not the character, to
+show him at 2 m (`stature`). Also writes OUT.strip.png; OUT.png with
+`--only 0,12` renders stills.
 
 Renders are painted (the character's own colour texture, Workbench
 studio light, shadows) since 2026-11-13; `--grey` for the old flat
