@@ -3,7 +3,7 @@
 needs Blender and ffmpeg).
 
     motion_sheet.py strip OUT.png ROW [ROW ...] [--view 3q|front|side]
-        [--trail DEF-hand.R]
+        [--trail DEF-hand.R] [--prop sword.glb@Socket_Hand_R] [--grey]
     motion_sheet.py reel OUT.mp4 ROW [ROW ...] [--view ...] [--trail ...]
         (also writes OUT.strip.png: 8 evenly spaced frames per row)
 
@@ -76,11 +76,14 @@ def ff(*args):
 def main():
     kind, out = sys.argv[1], sys.argv[2]
     rest = sys.argv[3:]
-    opts = {"view": "3q", "trail": None}
+    opts = {"view": "3q", "trail": None, "prop": None, "grey": False}
     rows = []
     i = 0
     while i < len(rest):
-        if rest[i].startswith("--"):
+        if rest[i] == "--grey":
+            opts["grey"] = True
+            i += 1
+        elif rest[i].startswith("--"):
             opts[rest[i][2:]] = rest[i + 1]
             i += 2
         else:
@@ -95,6 +98,7 @@ def main():
         elif r["frames"] == "even8":
             r["frames"] = [round((n - 1) * k / 7) for k in range(8)]
     spec = {"out": os.path.join(tmp, "t"), "view": opts["view"], "trail": opts["trail"],
+            "paint": not opts["grey"], "prop": opts["prop"],
             "shared_camera": True, "size": [480, 540] if kind == "strip" else [480, 600],
             "rows": rows}
     render(spec, tmp)

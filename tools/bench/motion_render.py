@@ -9,6 +9,9 @@ SPEC = {
   "view": "3q" | "front" | "side",  # 3q: front, 30 deg toward the right hand
   "shared_camera": true,            # one framing for every row (fair compare)
   "trail": "DEF-hand.R",            # optional: that joint's path over the clip
+  "paint": true,                    # the character's own colour texture
+                                    # (default); false = flat grey-blue
+  "prop": "sword.glb@Socket_Hand_R", # optional: a model held at a socket
   "rows": [{"label": "orig", "glb": "a.glb", "clip": "attack_1",
             "frames": "all" | [0, 5, 9], "mark": [9]}]
 }
@@ -17,6 +20,9 @@ The camera is fixed in the world (it does not follow the character) over a
 10 cm ground grid, so a sliding foot shows as a foot moving against the
 grid. The trail (red) is the joint's whole path; a red ball sits on the
 joint. Each tile carries its row label and frame; marked frames say so.
+The character is painted with its own colour texture (the owner judges
+motion on the game's look, never on grey), lit by Workbench's studio light
+with shadows; a prop (the hero's sword) can ride a hand socket.
 """
 
 import json
@@ -42,6 +48,20 @@ def clear():
 def mat(name, rgba):
     m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     m.diffuse_color = rgba
+    # Under TEXTURE shading an untextured material shows its node colour:
+    # a 1x1 image of the colour makes the floor and labels read the same
+    # painted or not.
+    m.use_nodes = True
+    nt = m.node_tree
+    img = bpy.data.images.get("px_" + name) or bpy.data.images.new("px_" + name, 1, 1)
+    img.pixels = list(rgba)
+    tex = next((n for n in nt.nodes if n.type == 'TEX_IMAGE'), None) or nt.nodes.new("ShaderNodeTexImage")
+    tex.image = img
+    bsdf = next((n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+    if bsdf is not None:
+        bsdf.inputs["Base Color"].default_value = rgba
+        nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    nt.nodes.active = tex
     return m
 
 
@@ -65,11 +85,67 @@ def load(row):
     arm.animation_data.action = act
     if hasattr(arm.animation_data, "action_slot") and act.slots:
         arm.animation_data.action_slot = act.slots[0]
-    for o in meshes:
-        o.data.materials.clear()
-        o.data.materials.append(mat("body", (0.32, 0.38, 0.52, 1)))
+    if not SPEC.get("paint", True):
+        for o in meshes:
+            o.data.materials.clear()
+            o.data.materials.append(mat("body", (0.32, 0.38, 0.52, 1)))
+    if SPEC.get("prop"):
+        meshes += attach_prop(arm, SPEC["prop"])
     f0, f1 = (int(round(x)) for x in act.frame_range)
     return arm, meshes, f0, f1
+
+
+def attach_prop(arm, spec):
+    """Import `path.glb@Socket` and hold it at that socket (a node under a
+    hand bone in the GLB: Blender imports it as a bone or an empty)."""
+    path, socket = spec.rsplit("@", 1)
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=path)
+    new = [o for o in bpy.data.objects if o not in before]
+    roots = [o for o in new if o.parent is None]
+    holder = bpy.data.objects.get(socket)
+    for o in roots:
+        mw = o.matrix_world.copy()
+        if socket in arm.data.bones:
+            o.parent = arm
+            o.parent_type = 'BONE'
+            o.parent_bone = socket
+            # Bone parenting puts the child at the bone's tail.
+            o.matrix_parent_inverse.identity()
+            o.location = (0, -arm.data.bones[socket].length, 0)
+        elif holder is not None:
+            o.parent = holder
+            o.matrix_parent_inverse.identity()
+            o.matrix_basis = mw
+        else:
+            raise SystemExit(f"no socket {socket} in the rig")
+    return [o for o in new if o.type == 'MESH']
+
+
+def grid_mat():
+    """Floor colour with a line every 10 cm (12 m plane, 10 px a cell)."""
+    m = mat("floor", (0.86, 0.86, 0.84, 1))
+    img = bpy.data.images.get("floor_grid")
+    if img is None:
+        n = 1200
+        img = bpy.data.images.new("floor_grid", n, n)
+        bg, ln = (0.86, 0.86, 0.84, 1.0), (0.62, 0.62, 0.68, 1.0)
+        row_bg = list(bg) * n
+        row_ln = list(ln) * n
+        px = []
+        for y in range(n):
+            if y % 10 == 0:
+                px += row_ln
+            else:
+                r = row_bg[:]
+                for x in range(0, n, 10):
+                    r[4 * x:4 * x + 4] = ln
+                px += r
+        img.pixels = px
+    tex = next(nd for nd in m.node_tree.nodes if nd.type == 'TEX_IMAGE')
+    tex.image = img
+    tex.interpolation = 'Closest'
+    return m
 
 
 def joint(arm, name):
@@ -119,8 +195,14 @@ def setup(frame_pts, height, fwd):
     scn = bpy.context.scene
     scn.render.engine = 'BLENDER_WORKBENCH'
     scn.display.shading.light = 'STUDIO'
-    scn.display.shading.color_type = 'MATERIAL'
+    scn.display.shading.color_type = 'TEXTURE' if SPEC.get("paint", True) else 'MATERIAL'
     scn.display.shading.show_shadows = True
+    scn.display.shading.shadow_intensity = 0.6
+    scn.display.shading.show_cavity = SPEC.get("paint", True)
+    scn.display.shading.cavity_type = 'WORLD'
+    scn.view_settings.view_transform = 'Standard'
+    # Floor and grid stay their flat colours under TEXTURE shading.
+    scn.render.film_transparent = False
     scn.render.resolution_x, scn.render.resolution_y = W, H
     scn.render.resolution_percentage = 100
     scn.world = scn.world or bpy.data.worlds.new('w')
@@ -152,14 +234,10 @@ def setup(frame_pts, height, fwd):
     mid = c + r_ax * ((x0 + x1) / 2) + u_ax * ((y0 + y1) / 2)
     cam.location = mid + view * 20 * height
     scn.camera = cam
-    # Solid floor with a 10 cm grid on it.
+    # Floor: a 12 m plane textured with a 10 cm grid (a texture, not a
+    # wireframe object, whose lines would cast shadows across the floor).
     bpy.ops.mesh.primitive_plane_add(size=12, location=(c.x, c.y, 0))
-    bpy.context.active_object.data.materials.append(mat("floor", (0.86, 0.86, 0.84, 1)))
-    bpy.ops.mesh.primitive_grid_add(x_subdivisions=120, y_subdivisions=120, size=12, location=(c.x, c.y, 0.001))
-    grid = bpy.context.active_object
-    wf = grid.modifiers.new("wf", 'WIREFRAME')
-    wf.thickness = 0.0025
-    grid.data.materials.append(mat("grid", (0.6, 0.6, 0.66, 1)))
+    bpy.context.active_object.data.materials.append(grid_mat())
     # Label, fixed to the camera's view (top left).
     txt = bpy.data.objects.new("label", bpy.data.curves.new("label", 'FONT'))
     scn.collection.objects.link(txt)
