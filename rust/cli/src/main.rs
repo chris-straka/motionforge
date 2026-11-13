@@ -19,6 +19,7 @@ use std::time::Instant;
 
 mod creature_cmds;
 mod glb_cmds;
+mod keypose_cmd;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -39,6 +40,7 @@ commands:\n\
   motion check   score each clip of a rigged GLB: foot skate, ground, limbs in the body, jerk, attack timing\n\
   clean          fix a rigged GLB's own clips: floor offset, feet under the floor, sliding plants, arms in the body\n\
   grip           find a weapon clip set's grip, write it into the hand socket\n\
+  keypose        key-pose drawings (landmarks JSON) -> a timed attack clip on a rigged GLB\n\
   pose-test      range-of-motion poses as animations (+ rendered sheet)\n\
   fixture-glb    procedural skinned test humanoid GLB\n\
   adapter        genforge character-chain adapter (adapter --help)\n\
@@ -111,6 +113,16 @@ animate flags:\n\
   --weapon-length <heights> (default 0.75)  --weapon-clips <a,b> (name parts)\n\
   --contact-ramp <s> (default 0.15)  --proxies <json> (write collision proxies)\n\
   --stylize attacks|<a,b> (body stylizer on those clips)  --clean (then `clean` on every clip)\n\
+\n\
+keypose flags:\n\
+  --rig <rigged glb> --landmarks <json from python/keypose/landmarks.py> --output <glb>\n\
+  [--name <clip>] [--roles load,strike,follow] [--start-clip idle|none] [--end-clip idle|none]\n\
+  [--sword R|L|none] [--hands auto|one|two] [--feet hold|order|drawn] [--side-turn 0|auto|<deg>]\n\
+  [--depth-weight 0.2] [--fps 30]\n\
+  [--windup-frames 9] [--hold-load 4] [--strike-frames 3] [--follow-frames 4] [--hold-follow 7]\n\
+  [--recover-frames 10] [--overshoot 0.6] [--creep 0.25] [--anticipation 0.15]\n\
+  [--key-clips (each fitted key as a one-frame clip <name>_key<i>)] [--only (drop the rig's other clips)]\n\
+  [--report <json>]\n\
 \n\
 grip flags:\n\
   --input <glb with weapon clips> [--side R|L] [--weapon-length <heights>]\n\
@@ -196,6 +208,8 @@ fn is_bool_flag(key: &str) -> bool {
             | "no-lock"
             | "contact"
             | "clean"
+            | "only"
+            | "key-clips"
             | "walk"
             | "force"
             | "time"
@@ -702,6 +716,7 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "motion-check" => glb_cmds::cmd_motion_check(&args),
             "clean" => glb_cmds::cmd_clean(&args),
             "grip" => glb_cmds::cmd_grip(&args),
+            "keypose" => keypose_cmd::cmd_keypose(&args),
             "pose-test" => glb_cmds::cmd_pose_test(&args),
             "fixture-glb" => glb_cmds::cmd_fixture_glb(&args),
             "creature-profile" => creature_cmds::cmd_profile(&args),
