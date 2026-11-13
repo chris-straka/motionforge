@@ -1500,38 +1500,58 @@ pub fn solve_arm_turn(
     if a < 1e-9 || b < 1e-9 {
         return;
     }
-    let mut to = target - s;
-    let reach = to
-        .length()
-        .clamp((a - b).abs() + 1e-6, a + b - 1e-6 * (a + b));
-    if to.length() < 1e-9 {
-        return;
-    }
-    to = to.normalized();
-    let t = s + to.scale(reach);
-    // Bend plane: the current elbow's offset from the shoulder-target line.
-    let ce = e - s;
-    let mut pole = ce - to.scale(ce.dot(to));
-    if pole.length() < 1e-6 * a {
-        let cw = (w - e).normalized();
-        pole = cw.scale(-1.0) - to.scale(-cw.dot(to));
-        if pole.length() < 1e-9 {
-            return;
-        }
-    }
-    let pole = pole.normalized();
-    let cos_a = ((a * a + reach * reach - b * b) / (2.0 * a * reach)).clamp(-1.0, 1.0);
-    let ang = crate::detmath::acos(cos_a);
-    let (sa, ca) = crate::detmath::sin_cos(ang);
-    let e2 = s + to.scale(a * ca) + pole.scale(a * sa);
     let ru_old = world[upper].rotation();
     let rf_old = world[fore].rotation();
     let rh_old = turn.mul(world[hand].rotation());
-    let q1 = shortest_arc((e - s).normalized(), (e2 - s).normalized());
-    let ru_new = q1.mul(ru_old);
-    let fdir = q1.rotate_vec((w - e).normalized());
-    let q2 = shortest_arc(fdir, (t - e2).normalized());
-    let rf_new = q2.mul(q1).mul(rf_old);
+    let goal = target - s;
+    if goal.length() < 1e-9 {
+        return;
+    }
+    let reach = goal
+        .length()
+        .clamp((a - b).abs() + 1e-6, a + b - 1e-6 * (a + b));
+    let u = e - s;
+    let v = w - e;
+    let bend = u.cross(v);
+    let (ru_new, rf_new) = if bend.length() > 1e-4 * a * b {
+        // A hinge: change the bend about the elbow's own axis, then swing
+        // the whole limb from the shoulder onto the target. The elbow
+        // never leaves its hinge plane (solving in the plane through the
+        // shoulder, the old elbow and the target, as this used to, bent
+        // the elbow sideways whenever the target moved off the limb's own
+        // plane).
+        let axis = bend.normalized();
+        let phi = crate::detmath::acos((u.dot(v) / (a * b)).clamp(-1.0, 1.0));
+        let cos_new = ((reach * reach - a * a - b * b) / (2.0 * a * b)).clamp(-1.0, 1.0);
+        let phi_new = crate::detmath::acos(cos_new);
+        let qb = Quat::from_axis_angle(axis, phi_new - phi);
+        let w_bent = s + u + qb.rotate_vec(v);
+        let qs = shortest_arc((w_bent - s).normalized(), goal.normalized());
+        (qs.mul(ru_old), qs.mul(qb).mul(rf_old))
+    } else {
+        // Straight limb: no hinge to read. Bend in the plane of the
+        // current elbow's offset from the shoulder-target line.
+        let to = goal.normalized();
+        let t = s + to.scale(reach);
+        let ce = e - s;
+        let mut pole = ce - to.scale(ce.dot(to));
+        if pole.length() < 1e-6 * a {
+            let cw = (w - e).normalized();
+            pole = cw.scale(-1.0) - to.scale(-cw.dot(to));
+            if pole.length() < 1e-9 {
+                return;
+            }
+        }
+        let pole = pole.normalized();
+        let cos_a = ((a * a + reach * reach - b * b) / (2.0 * a * reach)).clamp(-1.0, 1.0);
+        let ang = crate::detmath::acos(cos_a);
+        let (sa, ca) = crate::detmath::sin_cos(ang);
+        let e2 = s + to.scale(a * ca) + pole.scale(a * sa);
+        let q1 = shortest_arc((e - s).normalized(), (e2 - s).normalized());
+        let fdir = q1.rotate_vec((w - e).normalized());
+        let q2 = shortest_arc(fdir, (t - e2).normalized());
+        (q1.mul(ru_old), q2.mul(q1).mul(rf_old))
+    };
     let parent_rot = rig.parent[upper]
         .map(|p| world[p].rotation())
         .unwrap_or(Quat::IDENTITY);

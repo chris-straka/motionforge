@@ -477,3 +477,46 @@ fn readability_of_a_held_t_pose() {
     assert!((c.read.clear - 1.0).abs() < 1e-12, "{:?}", c.read);
     assert!(c.read.contrast_deg.abs() < 1e-9, "{:?}", c.read);
 }
+
+#[test]
+fn arm_ik_keeps_the_elbow_a_hinge() {
+    // A bent elbow, then its hand pulled sideways out of the arm's plane
+    // (the move the contact pass makes to clear the body): the hand
+    // reaches the target and the elbow stays in its hinge plane. Solving
+    // in the plane through shoulder, old elbow and target (the old IK)
+    // bent it sideways.
+    let s = subject();
+    let rig = &s.rig;
+    let fwd = motion_core::animate::forward(rig, &s.map);
+    let (up, fore, hand) = (
+        rig.find("DEF-upper_arm.R").unwrap(),
+        rig.find("DEF-forearm.R").unwrap(),
+        rig.find("DEF-hand.R").unwrap(),
+    );
+    let u = rig.head(fore) - rig.head(up);
+    let axis = u.cross(fwd).normalized();
+    let mut q = Quat::from_axis_angle(axis, 1.2);
+    if q.rotate_vec(rig.head(hand) - rig.head(fore)).dot(fwd) < 0.0 {
+        q = Quat::from_axis_angle(axis, -1.2);
+    }
+    let n = 4;
+    let mut frames = still(rig, n);
+    for (f, fr) in frames.iter_mut().enumerate() {
+        fr[fore] = Some(turned(rig, fore, q));
+        let w = rig.world(fr)[hand].t;
+        let target = w + axis.scale(0.05 * f as f64) + fwd.scale(-0.04 * f as f64);
+        solve_arm(rig, fr, up, fore, hand, target);
+        assert!(rig.world(fr)[hand].t.approx_eq(target, 1e-9), "frame {f}");
+    }
+    let l = score(&s, "idle", &times(n), &frames, false).limits;
+    assert!(!l.joints.iter().any(|j| j.starts_with("elbow")), "{l:?}");
+    // And the bend itself is exactly in the hinge plane.
+    for fr in &frames {
+        let w = rig.world(fr);
+        let (a, b) = (w[fore].t - w[up].t, w[hand].t - w[fore].t);
+        let hinge = w[up]
+            .rotation()
+            .rotate_vec(rig.rest_world[up].rotation().conj().rotate_vec(axis));
+        assert!(b.normalized().dot(hinge).abs() < 1e-9 + a.normalized().dot(hinge).abs());
+    }
+}
