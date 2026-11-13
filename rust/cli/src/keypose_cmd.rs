@@ -5,7 +5,9 @@ use motion_core::animate::{round, write_animation};
 use motion_core::glb::Document;
 use motion_core::helpers;
 use motion_core::json::{emit_pretty, Json};
-use motion_core::keypose::fit::{fit_sheet, restance, FitParams, KeyFit, RigInfo};
+use motion_core::keypose::fit::{
+    cap_torso_head, cap_wrists, clamp_elbows, fit_sheet, restance, FitParams, KeyFit, RigInfo,
+};
 use motion_core::keypose::timing::{build, Key, Role, TimingParams};
 use motion_core::keypose::{fuse, lm, order_legs, parse_landmarks, FuseParams, Fused, ViewMap};
 use motion_core::math::Vec3;
@@ -208,52 +210,125 @@ pub fn cmd_keypose(cmd: &Cmd) -> CmdResult {
     let start = rest_pose("start-clip")?;
     let end = rest_pose("end-clip")?;
     let stance = (feet_mode == "hold").then_some(strike_key);
-    // The report shows the fit to the drawings; the clip uses the staged keys.
-    let mut staged = fits.clone();
-    if let Some(si) = stance {
-        let st = staged[si].locals.clone();
-        for (k, f) in staged.iter_mut().enumerate() {
-            if k != si {
-                restance(&info, &mut f.locals, &st);
+    // The report shows the fit to the drawings; the clip uses the staged
+    // keys. --carry w: the follow-through carries on along the strike
+    // (each bone's load-to-strike turn continued by --carry-on of itself),
+    // blended w with the drawn follow-through. `auto` (default) tries 0,
+    // 0.5 and 1 and keeps the clip that reads best at the game camera
+    // (`motion check --camera game`'s read score).
+    let carry_on = parse_f64(cmd, "carry-on", 0.35)?;
+    let carries: Vec<f64> = match cmd.get("carry").unwrap_or("auto") {
+        "auto" => vec![0.0, 0.5, 1.0],
+        _ => vec![parse_f64(cmd, "carry", 0.0)?],
+    };
+    let li = roles.iter().position(|r| *r == Role::Load);
+    let fi = roles.iter().position(|r| *r == Role::Follow);
+    let make = |carry: f64| {
+        let mut staged = fits.clone();
+        if let (true, Some(li), Some(fi)) = (carry > 0.0, li, fi) {
+            for n in 0..info.rig.names.len() {
+                // The upper body carries on; the hips and legs keep the
+                // drawn stance (the feet are planted).
+                let legs = info.rig.is_ancestor(info.thigh[0], n)
+                    || info.rig.is_ancestor(info.thigh[1], n)
+                    || info.thigh.contains(&n)
+                    || info.rig.names[n].contains("thigh");
+                // The off arm is put on the grip frame by frame.
+                let off = fp.sword_hand.is_some_and(|s| {
+                    let o = 1 - s;
+                    [info.upper[o], info.fore[o], info.hand[o]].contains(&n)
+                });
+                if n == info.hips || legs || (two && off) {
+                    continue;
+                }
+                let get = |k: usize| fits[k].locals[n].unwrap_or(info.rig.rest[n]);
+                let (l, s, f) = (get(li), get(strike_key), get(fi));
+                let mut t = f;
+                t.r = f.r.slerp(l.r.slerp(s.r, 1.0 + carry_on), carry);
+                staged[fi].locals[n] = Some(t);
             }
-            f.planted = [true, true];
+            cap_torso_head(&info, &mut staged[fi].locals, &fp);
+            clamp_elbows(&info, &mut staged[fi].locals, &fp);
+            cap_wrists(&info, &mut staged[fi].locals, &fp);
+        }
+        if let Some(si) = stance {
+            let st = staged[si].locals.clone();
+            for (k, f) in staged.iter_mut().enumerate() {
+                if k != si {
+                    restance(&info, &mut f.locals, &st);
+                }
+                f.planted = [true, true];
+            }
+        }
+        let rest_key = |l: &Vec<Option<Trs>>| Key {
+            locals: l.clone(),
+            role: Role::Rest,
+            planted: [true, true],
+            drawn: false,
+            off_rel: None,
+            grip_gap: 0.0,
+        };
+        let mut keys = Vec::new();
+        if let Some(l) = &start {
+            keys.push(rest_key(l));
+        }
+        for (k, f) in staged.iter().enumerate() {
+            keys.push(Key {
+                locals: f.locals.clone(),
+                role: roles[k],
+                planted: f.planted,
+                drawn: true,
+                off_rel: f.off_rel,
+                grip_gap: f.grip_gap,
+            });
+        }
+        if let Some(l) = &end {
+            keys.push(rest_key(l));
+        }
+        let (mut frames, trep) = build(&info, &keys, &tp, &fp, two);
+        for l in frames.iter_mut() {
+            helpers::drive(&info.rig, l);
+        }
+        (frames, trep)
+    };
+    let mut tried: Vec<(f64, Option<f64>)> = Vec::new();
+    let mut best: Option<(
+        f64,
+        Vec<Vec<Option<Trs>>>,
+        motion_core::keypose::timing::TimingReport,
+    )> = None;
+    let stage = if carries.len() > 1 {
+        let subject =
+            motion_core::motioncheck::Subject::new(&doc, &motion_core::contact::Options::default())
+                .map_err(|e| (3, e))?;
+        let st = motion_core::readcam::Stage::new(
+            &doc,
+            &subject,
+            &motion_core::readcam::CamOptions::default(),
+        )
+        .map_err(|e| (3, e))?;
+        Some((subject, st))
+    } else {
+        None
+    };
+    let mut best_score = f64::NEG_INFINITY;
+    for &c in &carries {
+        let (frames, trep) = make(c);
+        let score = stage.as_ref().map(|(subject, st)| {
+            st.read(&subject.rig, &frames, 1.0 / tp.fps, &frames[0])
+                .0
+                .score
+        });
+        tried.push((c, score));
+        let sc = score.unwrap_or(0.0);
+        // A carried follow-through must read clearly better than the
+        // drawn one (by 0.02) to replace it.
+        if best.is_none() || sc > best_score + 0.02 {
+            best_score = sc;
+            best = Some((c, frames, trep));
         }
     }
-    let mut keys = Vec::new();
-    if let Some(l) = &start {
-        keys.push(Key {
-            locals: l.clone(),
-            role: Role::Rest,
-            planted: [true, true],
-            drawn: false,
-            off_rel: None,
-            grip_gap: 0.0,
-        });
-    }
-    for (k, f) in staged.iter().enumerate() {
-        keys.push(Key {
-            locals: f.locals.clone(),
-            role: roles[k],
-            planted: f.planted,
-            drawn: true,
-            off_rel: f.off_rel,
-            grip_gap: f.grip_gap,
-        });
-    }
-    if let Some(l) = &end {
-        keys.push(Key {
-            locals: l.clone(),
-            role: Role::Rest,
-            planted: [true, true],
-            drawn: false,
-            off_rel: None,
-            grip_gap: 0.0,
-        });
-    }
-    let (mut frames, trep) = build(&info, &keys, &tp, &fp, two);
-    for l in frames.iter_mut() {
-        helpers::drive(&info.rig, l);
-    }
+    let (carry, frames, trep) = best.expect("at least one carry");
 
     // Write: every mapped bone and helper, the hips' translation.
     let mut nodes: Vec<usize> = info.map.pairs.iter().map(|(n, _)| *n).collect();
@@ -450,6 +525,21 @@ pub fn cmd_keypose(cmd: &Cmd) -> CmdResult {
         },
         trep.lock_slide_max * 100.0
     ));
+    text.push_str(&format!(
+        "follow-through carry {carry}{}\n",
+        if tried.len() > 1 {
+            format!(
+                " (read at the game camera: {})",
+                tried
+                    .iter()
+                    .map(|(c, r)| format!("carry {c} {:.2}", r.unwrap_or(0.0)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            String::new()
+        }
+    ));
     text.push_str(&format!("output: {output} (clip {name})\n"));
     if let Some(path) = cmd.get("report") {
         let j = Json::obj(vec![
@@ -470,6 +560,21 @@ pub fn cmd_keypose(cmd: &Cmd) -> CmdResult {
             ),
             ("windup_found", Json::Bool(trep.windup_found)),
             ("counter_added", Json::Bool(trep.counter_added)),
+            ("carry", num(carry, 3)),
+            (
+                "carry_tried",
+                Json::Arr(
+                    tried
+                        .iter()
+                        .map(|(c, r)| {
+                            Json::obj(vec![
+                                ("carry", num(*c, 3)),
+                                ("read", r.map(|v| num(v, 3)).unwrap_or(Json::Null)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
             (
                 "steps",
                 Json::Arr(

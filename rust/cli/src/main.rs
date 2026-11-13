@@ -124,7 +124,8 @@ keypose flags:\n\
   [--sword R|L|none] [--hands auto|one|two] [--feet hold|order|drawn] [--side-turn 0|auto|<deg>]\n\
   [--depth-weight 0.2] [--fps 30]\n\
   [--windup-frames 9] [--hold-load 4] [--strike-frames 3] [--follow-frames 4] [--hold-follow 7]\n\
-  [--recover-frames 10] [--overshoot 0.6] [--creep 0.25] [--anticipation 0.15]\n\
+  [--recover-frames 10] [--overshoot 0.6] [--creep 0.06] [--anticipation 0.15]\n\
+  [--carry auto|<0..1> (follow-through carried on along the strike; auto: best game-camera read)] [--carry-on 0.35]\n\
   [--key-clips (each fitted key as a one-frame clip <name>_key<i>)] [--only (drop the rig's other clips)]\n\
   [--report <json>]\n\
 \n\

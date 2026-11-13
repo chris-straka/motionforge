@@ -308,6 +308,46 @@ fn cap(
     ang - max_deg
 }
 
+/// Elbows back into their hinge: the forearm turned into the hinge plane
+/// and its bend clamped to `flex_min_deg..flex_max_deg` (a pose made by
+/// carrying rotations on can bend an arm past straight). The hand keeps
+/// its rotation relative to the forearm.
+pub fn clamp_elbows(info: &RigInfo, locals: &mut [Option<Trs>], params: &FitParams) {
+    let rig = &info.rig;
+    for s in 0..2 {
+        let (u, f, h) = (info.upper[s], info.fore[s], info.hand[s]);
+        let Some(axis_rest) = hinge_axis(rig, u, f, h) else {
+            continue;
+        };
+        let a_local = info.rest_rot(u).conj().rotate_vec(axis_rest);
+        let w = rig.world(locals);
+        let n = w[u].rotation().rotate_vec(a_local).normalized();
+        let ud = (w[f].t - w[u].t).normalized();
+        let ld = w[h].t - w[f].t;
+        let inplane = ld - n.scale(ld.dot(n));
+        if inplane.length() < 1e-9 {
+            continue;
+        }
+        let flex = signed_angle(ud, inplane, n).to_degrees();
+        let want = flex.clamp(params.flex_min_deg, params.flex_max_deg);
+        let target =
+            Quat::from_axis_angle(n, (want - flex).to_radians()).rotate_vec(inplane.normalized());
+        let q = shortest_arc(ld.normalized(), target);
+        set_world_rot(rig, locals, f, q.mul(w[f].rotation()));
+    }
+}
+
+/// The chest within `torso_max_deg` of the hips and the head within
+/// `head_max_deg` of the chest (as `motion check` measures them).
+pub fn cap_torso_head(info: &RigInfo, locals: &mut [Option<Trs>], params: &FitParams) {
+    if let Some(&chest) = info.spine.last() {
+        cap(info, locals, chest, info.hips, params.torso_max_deg);
+        if let Some(head) = info.head {
+            cap(info, locals, head, chest, params.head_max_deg);
+        }
+    }
+}
+
 /// Both wrists within `wrist_max_deg` (between keys the coil and the
 /// interpolation can carry a wrist past what each key had).
 pub fn cap_wrists(info: &RigInfo, locals: &mut [Option<Trs>], params: &FitParams) {
