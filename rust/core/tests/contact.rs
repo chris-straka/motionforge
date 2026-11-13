@@ -70,10 +70,14 @@ fn contact_pass_moves_the_hand_out_of_the_chest_and_eases() {
         .map(|k| (w(&frames[k]) - w(&original[k])).length())
         .collect();
     assert!(shift[5] >= shift[3] && shift[3] >= shift[1], "{shift:?}");
-    // The hand keeps its world rotation (IK leaves it alone).
-    let r0 = rig.world(&original[5])[h].rotation();
-    let r1 = rig.world(&frames[5])[h].rotation();
-    assert!(r0.angle_to(r1) < 1e-6);
+    // No blade to aim: the hand keeps its rotation relative to the
+    // forearm (it turns with it, the wrist does not bend).
+    let fa = rig.find("DEF-forearm.R").unwrap();
+    let rel = |fr: &Vec<Option<Trs>>| {
+        let w = rig.world(fr);
+        w[fa].rotation().conj().mul(w[h].rotation())
+    };
+    assert!(rel(&original[5]).angle_to(rel(&frames[5])) < 1e-6);
     // Same input, same output.
     let mut again = original.clone();
     fix_clip(&body, &rig, &mut again, &times, "attack_test", &opts);

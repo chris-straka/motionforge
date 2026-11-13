@@ -54,6 +54,11 @@ pub struct Options {
     pub ramp: f64,
     /// Clearance kept between surfaces, in character heights.
     pub margin: f64,
+    /// Leave a free arm (no blade in this clip) alone when its deepest mesh
+    /// contact is shallower than this (character heights): a hand resting
+    /// against a coat is not a limb through the body, and pushing it out
+    /// splayed the arm. 0 = clear every contact.
+    pub min_depth: f64,
 }
 
 impl Default for Options {
@@ -69,6 +74,7 @@ impl Default for Options {
             .collect(),
             ramp: 0.15,
             margin: 0.004,
+            min_depth: 0.0,
         }
     }
 }
@@ -1512,19 +1518,42 @@ pub fn solve_arm_turn(
         .clamp((a - b).abs() + 1e-6, a + b - 1e-6 * (a + b));
     let u = e - s;
     let v = w - e;
+    // The hinge axis, fixed in the upper bone: the anatomical one
+    // ([`hinge_axis`]; a nearly straight limb's own cross product is noise,
+    // and a hinge read from it flipped the elbow between frames), else the
+    // current bend when that is clear.
+    let rest_axis = hinge_axis(rig, upper, fore, hand)
+        .map(|n| ru_old.rotate_vec(rig.rest_world[upper].rotation().conj().rotate_vec(n)));
     let bend = u.cross(v);
-    let (ru_new, rf_new) = if bend.length() > 1e-4 * a * b {
-        // A hinge: change the bend about the elbow's own axis, then swing
-        // the whole limb from the shoulder onto the target. The elbow
-        // never leaves its hinge plane (solving in the plane through the
-        // shoulder, the old elbow and the target, as this used to, bent
-        // the elbow sideways whenever the target moved off the limb's own
-        // plane).
-        let axis = bend.normalized();
-        let phi = crate::detmath::acos((u.dot(v) / (a * b)).clamp(-1.0, 1.0));
-        let cos_new = ((reach * reach - a * a - b * b) / (2.0 * a * b)).clamp(-1.0, 1.0);
-        let phi_new = crate::detmath::acos(cos_new);
-        let qb = Quat::from_axis_angle(axis, phi_new - phi);
+    let axis = rest_axis.or(if bend.length() > 0.14 * a * b {
+        Some(bend.normalized())
+    } else {
+        None
+    });
+    let (ru_new, rf_new) = if let Some(axis) = axis {
+        // A hinge: turn the lower bone about the axis until the limb's
+        // reach is right, keeping the bend's side, then swing the whole
+        // limb from the shoulder onto the target. The elbow never leaves
+        // its hinge plane (solving in the plane through shoulder, old
+        // elbow and target, as this used to, bent it sideways whenever the
+        // target moved off the limb's own plane).
+        let (u_par, v_par) = (axis.scale(u.dot(axis)), axis.scale(v.dot(axis)));
+        let (u_perp, v_perp) = (u - u_par, v - v_par);
+        let (lu, lv) = (u_perp.length(), v_perp.length());
+        let qb = if lu > 1e-9 && lv > 1e-9 {
+            let c = (u_perp.dot(v_perp) / (lu * lv)).clamp(-1.0, 1.0);
+            let sign = if u_perp.cross(v_perp).dot(axis) >= 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
+            let alpha = sign * crate::detmath::acos(c);
+            let k = ((reach * reach - a * a - b * b) / 2.0 - u_par.dot(v_par)) / (lu * lv);
+            let target_angle = sign * crate::detmath::acos(k.clamp(-1.0, 1.0));
+            Quat::from_axis_angle(axis, target_angle - alpha)
+        } else {
+            Quat::IDENTITY
+        };
         let w_bent = s + u + qb.rotate_vec(v);
         let qs = shortest_arc((w_bent - s).normalized(), goal.normalized());
         (qs.mul(ru_old), qs.mul(qb).mul(rf_old))
@@ -1582,6 +1611,42 @@ pub fn solve_arm_turn(
     let mut lh = locals[hand].unwrap_or(rig.rest[hand]);
     lh.r = canonical_quat(hp_rot.conj().mul(rh_old));
     locals[hand] = Some(lh);
+}
+
+/// Rest-pose hinge axis of a limb (world), oriented so a positive turn of
+/// the lower bone about it is the natural bend (knee: shin back; elbow:
+/// forearm forward): `upper x facing`, the facing read from the feet
+/// (heel to toe) of a standard (`DEF-`) skeleton. None when the rig has no
+/// feet to read or the limb points along the facing.
+pub fn hinge_axis(rig: &Rig, upper: usize, fore: usize, hand: usize) -> Option<Vec3> {
+    let mut fwd = Vec3::ZERO;
+    for side in ["L", "R"] {
+        if let (Some(f), Some(t)) = (
+            rig.find(&format!("DEF-foot.{side}")),
+            rig.find(&format!("DEF-toe.{side}")),
+        ) {
+            let d = rig.head(t) - rig.head(f);
+            fwd = fwd + Vec3::new(d.x, 0.0, d.z);
+        }
+    }
+    if fwd.length() < 1e-9 {
+        return None;
+    }
+    let fwd = fwd.normalized();
+    let u = rig.head(fore) - rig.head(upper);
+    let n = u.cross(fwd);
+    if n.length() < 0.2 * u.length() {
+        return None;
+    }
+    let n = n.normalized();
+    let leg = rig.names[hand].contains("foot");
+    let toward = if leg { -1.0 } else { 1.0 };
+    let bent = u.normalized() + fwd.scale(0.2 * toward);
+    Some(if u.cross(bent).dot(n) >= 0.0 {
+        n
+    } else {
+        n.scale(-1.0)
+    })
 }
 
 /// Per clip and arm: what the pass found and changed.
@@ -1901,6 +1966,9 @@ fn fix_arm(
                     base + extra,
                     rotvec_quat(turn),
                 );
+                if !use_weapon {
+                    locals[arm.hand] = original[f][arm.hand];
+                }
             }
             if extra.length() > 0.0 || turn.length() > 0.0 {
                 any = true;
@@ -1937,10 +2005,64 @@ fn fix_arm(
                 wrist0[f] + offset[f],
                 rotvec_quat(turn_off[f]),
             );
+            if !use_weapon {
+                // A free hand turns with its forearm (see `fix_clip`).
+                locals[arm.hand] = original[f][arm.hand];
+            }
             frames[f] = locals;
         }
     }
     (frames, offset, turn_off)
+}
+
+/// Each vector's size kept, its direction smoothed: the binomial
+/// [1 4 6 4 1]/16 mean of its neighbours (weighted by their sizes, ends
+/// held), normalized.
+fn steady_dir(v: &[Vec3]) -> Vec<Vec3> {
+    let n = v.len();
+    let at = |i: isize| v[i.clamp(0, n as isize - 1) as usize];
+    (0..n as isize)
+        .map(|i| {
+            let m = (at(i - 2) + at(i + 2) + (at(i - 1) + at(i + 1)).scale(4.0) + at(i).scale(6.0))
+                .scale(1.0 / 16.0);
+            let len = at(i).length();
+            if m.length() > 1e-12 && len > 0.0 {
+                m.normalized().scale(len)
+            } else {
+                at(i)
+            }
+        })
+        .collect()
+}
+
+/// How fast a contact correction may change: wrist offset in character
+/// heights per second, blade turn in radians per second.
+pub const MAX_OFFSET_SPEED: f64 = 0.9;
+pub const MAX_TURN_SPEED: f64 = 3.0;
+
+/// Limit the change between neighbouring frames to `step`: each pair that
+/// differs by more is pulled together, half each way, repeatedly (a jump
+/// is spread over the frames around it; a sequence already within the
+/// limit is returned unchanged).
+fn rate_limit(v: &[Vec3], step: f64) -> Vec<Vec3> {
+    let mut out = v.to_vec();
+    for _ in 0..64 {
+        let mut moved = false;
+        for f in 0..out.len().saturating_sub(1) {
+            let d = out[f + 1] - out[f];
+            let len = d.length();
+            if len > step * (1.0 + 1e-9) {
+                let fix = d.scale((len - step) / (2.0 * len));
+                out[f] = out[f] + fix;
+                out[f + 1] = out[f + 1] - fix;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    out
 }
 
 /// Rotation vector (axis * angle) to quaternion.
@@ -2024,6 +2146,17 @@ pub fn fix_clip(
             report.arms.push(rep);
             continue;
         }
+        // A free hand resting shallowly against the coat or a hip is left
+        // where it is (pushing it out splayed the arm); the weapon arm is
+        // always cleared (a forearm through the chest is shallow too).
+        if !use_weapon && opts.min_depth > 0.0 && mdb < opts.min_depth * body.height {
+            rep.frames_after = fb;
+            rep.max_depth_after = db;
+            rep.mesh_frames_after = rep.mesh_frames_before;
+            rep.mesh_depth_after = mdb;
+            report.arms.push(rep);
+            continue;
+        }
         let original: Vec<Vec<Option<Trs>>> = frames.to_vec();
         let mut best: Option<Attempt> = None;
         for grow in [1.0, 1.15, 1.3, 1.5, 1.75, 2.0, 2.4, 3.0] {
@@ -2042,7 +2175,49 @@ pub fn fix_clip(
                 break;
             }
         }
-        let (fixed, offset, left, mda, turns) = best.unwrap();
+        let (_, offset, _, _, turns) = best.unwrap();
+        // The per-frame corrections may change only so fast: where the
+        // body part to clear switches (a lying body's arm pushed out one
+        // side, then the other), the chosen offset jumped tens of
+        // centimetres in a frame or two, which reads as a twitch
+        // (back-and-forth on the game's death: 0.2 -> 9 mm). Jumps are
+        // spread out; corrections that already ease are left as they are.
+        let dt = if times.len() > 1 {
+            ((times[times.len() - 1] - times[0]) / (times.len() - 1) as f64).max(1e-6)
+        } else {
+            1.0 / 30.0
+        };
+        // The direction wobbled frame to frame within any speed limit (a
+        // weighted mean of whichever surfaces were hit): smooth it, keep
+        // each frame's size (the clearance).
+        let offset = rate_limit(&steady_dir(&offset), MAX_OFFSET_SPEED * body.height * dt);
+        let turns = rate_limit(&steady_dir(&turns), MAX_TURN_SPEED * dt);
+        let arm_ = &body.arms[ai];
+        let mut fixed = original.clone();
+        for f in 0..fixed.len() {
+            if offset[f].length() <= 0.0 && turns[f].length() <= 0.0 {
+                continue;
+            }
+            let wrist = rig.world(&original[f])[arm_.hand].t;
+            solve_arm_turn(
+                rig,
+                &mut fixed[f],
+                arm_.upper,
+                arm_.fore,
+                arm_.hand,
+                wrist + offset[f],
+                rotvec_quat(turns[f]),
+            );
+            // A hand with no blade to aim turns with its forearm (keeping
+            // its world rotation while the wrist moved up to 24 cm bent
+            // wrists past their limits: on the game's clips, frames past a
+            // limit 245 -> 509).
+            if !use_weapon {
+                fixed[f][arm_.hand] = original[f][arm_.hand];
+            }
+        }
+        let (ma, mda, _) = mesh_measure(body, ai, rig, &fixed, use_weapon);
+        let left = ma.iter().filter(|&&x| x).count();
         frames.clone_from_slice(&fixed);
         let (fa, da, _) = measure(body, ai, rig, frames, use_weapon);
         rep.frames_after = fa;
