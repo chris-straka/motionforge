@@ -16,6 +16,7 @@ pub mod glb;
 pub mod helpers;
 pub mod humanoid;
 pub mod json;
+pub mod keypose;
 pub mod limits;
 pub mod math;
 pub mod motioncheck;
