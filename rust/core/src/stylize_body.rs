@@ -284,6 +284,27 @@ pub fn stylize_body(
     let mut exag_scale = 1.0;
     if let Some(acc) = &track.accent {
         let araw = raw_speed(acc, track.fps);
+        // The strike's load: the last frame before the accent's fastest
+        // where it still moved against the strike (as `motion check` finds
+        // it). Speed minima missed it on the game's keyed attacks (the hand
+        // turns round at speed), and a counter pose then landed on top of
+        // the real windup.
+        let n = acc.len();
+        if n >= 3 {
+            let vel = |f: usize| {
+                let (a, b) = (f.saturating_sub(1), (f + 1).min(n - 1));
+                (acc[b][1] - acc[b][0]) - (acc[a][1] - acc[a][0])
+            };
+            let peak = (0..n)
+                .max_by(|&a, &b| vel(a).length().partial_cmp(&vel(b).length()).unwrap())
+                .unwrap_or(0);
+            let dir = vel(peak).normalized();
+            if let Some(load) = (1..peak).rev().find(|&f| vel(f).dot(dir) <= 0.0) {
+                if keys.iter().all(|&b| b.abs_diff(load) >= 2) {
+                    keys.push(load);
+                }
+            }
+        }
         // The accent's own stops, where the body's keys leave room.
         for k in body_keys(&araw, params.key_prominence, p.min_spacing) {
             if keys.iter().all(|&b| b.abs_diff(k) >= p.min_spacing) {
@@ -311,6 +332,12 @@ pub fn stylize_body(
         }
     }
     let top = speed.iter().cloned().fold(0.0, f64::max);
+    // Accent position relative to the hips, per frame (for the windup test).
+    let accent_rel: Option<Vec<Vec3>> = track
+        .accent
+        .as_ref()
+        .filter(|a| a.iter().all(|f| f.len() >= 2))
+        .map(|a| a.iter().map(|f| f[1] - f[0]).collect());
     let mut report = BodyReport {
         keys: keys.clone(),
         exag_scale,
@@ -336,7 +363,20 @@ pub fn stylize_body(
         // Anticipation and its hold may take at most half the segment:
         // squeezing a strike into the rest skips the source's extremes
         // (a 7-frame overhead chop kept 2 frames and lost its top).
-        let room = big && p.anticipation > 0.0 && len >= 2 * (a + p.hold);
+        // The source already winds up when the segment before this one
+        // moved the accent (weapon hand) against this one's move, by at
+        // least 30% of it: a counter pose on top wound the arm up twice
+        // and the hand zigzagged (attack_1: out, up, out wide in three
+        // frames).
+        let wound = accent_rel.as_ref().is_some_and(|h| {
+            let prev = keys.iter().rev().find(|&&k| k < k0);
+            prev.is_some_and(|&kp| {
+                let d_prev = h[k0] - h[kp];
+                let d_this = h[k1] - h[k0];
+                d_prev.dot(d_this) < 0.0 && d_prev.length() >= 0.3 * d_this.length()
+            })
+        });
+        let room = big && !wound && p.anticipation > 0.0 && len >= 2 * (a + p.hold);
         if big && p.anticipation > 0.0 {
             if room {
                 report.counters_added += 1;

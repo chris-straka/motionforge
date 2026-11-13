@@ -164,3 +164,40 @@ Next: find the back-and-forth in the stylized clips (hold-to-strike
 corners in the time warp, and the re-plant moving ankles up to 25 cm);
 keep the source's widest windup pose as the anticipation instead of a
 counter-rotation from the key.
+
+## 2026-11-13, round 3: the stylizer's double windup
+
+Owner rule (2026-11-13, via the orchestrator): a method that wins on some
+clips stays and is chosen per case; a promising method that loses is
+worked on; when score and pictures disagree, fix the benchmark first.
+
+The score said round 2's stylized attack_1 was 150x rougher than the
+original (63 vs 0.4 mm, one spike of 743 mm at frame 8). The frames agree
+with it: the sword hand goes out (6), up (7), out wide (8): a zigzag.
+Cause: the stylizer added its counter pose (anticipation) on top of the
+source's own windup, so the arm wound up twice. Two fixes, each on the
+eleven attack clips:
+
+| measure (sum over 11 clips) | original | round 2 | no counter on a source windup | + the strike's load is a key |
+|---|---|---|---|---|
+| skate cm | 4.6 | 39.7 | 30.1 | 34.4 |
+| floating frames | 8 | 35 | 30 | 38 |
+| through-body frames | 361 | 419 | 408 | 408 |
+| back-and-forth mm | 9.3 | 200.0 | 180.3 | 133.5 |
+| joint-limit frames | 32 | 180 | 152 | 159 |
+| joint-limit worst deg | 43.1 | 274.4 | 182.3 | 174.2 |
+
+- No counter pose when the segment before a strike already moved the
+  weapon hand against it by 30%+ of the strike.
+- The strike's load (last frame before the hand's fastest where it still
+  moved against the strike, as `motion check` finds it) is a key: the
+  hand turns round at speed there, so speed minima missed it.
+
+attack_1 now: back-and-forth 29 mm (round 2: 63), the windup is held up
+beside the head for a beat where the original swings wide to the right
+(`bench/round1/attack_1_round3.*`): a different windup, the owner's call.
+Still rougher than the originals everywhere. Next: find the remaining
+spikes (quirin-attack_2 652 mm at frame 14, attack_1 284 at 6: the
+hold-to-strike corner of the time warp), then `--stylize auto`: stylize a
+clip only where its defects stay within the original's and its windup or
+hold grows, and report per clip which won.
