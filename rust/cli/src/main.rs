@@ -140,6 +140,7 @@ creature-solve flags:\n\
   [--glb-in <rig glb> --glb-out <glb> [--clip-name <name>]] [--no-pin] [--force]\n\
   [--smooth-sigma 1] [--quat-sigma 0.8] [--max-gap-ratio 0.08] [--max-motion-ratio 0.5]\n\
   [--min-conf 0.2] [--report <json>]\n\
+  [--align-views [--align-frame 0]] [--align-time off|lag|warp|auto [--max-lag 12]] [--aligned-out <detections>]\n\
 \n\
 creature-compare flags:\n\
   --creature <creature> --truth <clip> --solved <clip> [--output <json>]\n\
@@ -198,6 +199,7 @@ fn is_bool_flag(key: &str) -> bool {
             | "clean"
             | "walk"
             | "force"
+            | "align-views"
             | "time"
             | "help"
             | "h"

@@ -4,6 +4,7 @@
 //! and joint limits, quaternion smoothing, and planted feet that don't
 //! slide (CCD on the leg chain within limits).
 
+use super::align::{prepare, AlignReport, TimeMode};
 use super::camera::{closest_points, gap_ratio, View};
 use super::detect::Detections;
 use super::profile::Creature;
@@ -30,6 +31,14 @@ pub struct SolveParams {
     pub min_conf: f64,
     /// Solve even when the consistency check fails.
     pub force: bool,
+    /// Re-fit each view's zoom and shift on frame `align_frame` (the
+    /// rest pose of the start picture) before triangulating.
+    pub align_views: bool,
+    pub align_frame: usize,
+    /// Slide the second view in time against the first.
+    pub time_mode: TimeMode,
+    /// Largest slide tried, in frames (also capped at a quarter of the clip).
+    pub max_lag: usize,
 }
 
 impl Default for SolveParams {
@@ -42,6 +51,10 @@ impl Default for SolveParams {
             max_motion_ratio: 0.5,
             min_conf: 0.2,
             force: false,
+            align_views: false,
+            align_frame: 0,
+            time_mode: TimeMode::Off,
+            max_lag: 12,
         }
     }
 }
@@ -66,12 +79,14 @@ pub struct SolveReport {
     pub limited: usize,
     pub plants: usize,
     pub max_pin_shift_mm: f64,
+    /// What lining up the views did (absent when not asked for).
+    pub align: Option<AlignReport>,
 }
 
 impl SolveReport {
     pub fn to_json(&self) -> Json {
         let r = |v: f64, p: i32| (v * 10f64.powi(p)).round() / 10f64.powi(p);
-        Json::obj(vec![
+        let mut out = Json::obj(vec![
             ("frames", Json::num(self.frames as f64)),
             ("joints_seen", Json::num(self.joints_seen as f64)),
             ("joints_total", Json::num(self.joints_total as f64)),
@@ -82,7 +97,11 @@ impl SolveReport {
             ("limited", Json::num(self.limited as f64)),
             ("plants", Json::num(self.plants as f64)),
             ("max_pin_shift_mm", Json::num(r(self.max_pin_shift_mm, 2))),
-        ])
+        ]);
+        if let Some(a) = &self.align {
+            out.set("align", a.to_json());
+        }
+        out
     }
 }
 
@@ -211,6 +230,18 @@ fn triangulate_all(
     let still = (0.005 * c.height) * (0.005 * c.height) * frames * n as f64;
     let ratio = if var_z <= still { 0.0 } else { var_gap / var_z };
     Ok((points, med, ratio, seen))
+}
+
+/// The consistency numbers alone: (median ray gap over the height,
+/// height-disagreement motion ratio). What the time and camera
+/// alignment (`align`) minimise and what the solve's check reads.
+pub fn consistency(
+    c: &Creature,
+    d: &Detections,
+    params: &SolveParams,
+) -> Result<(f64, f64), String> {
+    let (_, med, ratio, _) = triangulate_all(c, d, params)?;
+    Ok((med, ratio))
 }
 
 /// Fill missing points from the nearest frame in time, then Gaussian
@@ -658,9 +689,12 @@ pub fn solve(
     d: &Detections,
     params: &SolveParams,
 ) -> Result<(Clip, SolveReport), String> {
+    let (aligned, align) = prepare(c, d, params)?;
+    let d = &aligned;
     let (mut points, med, ratio, seen) = triangulate_all(c, d, params)?;
     let mut report = SolveReport {
         frames: d.frames.len(),
+        align,
         joints_seen: seen,
         joints_total: c.skeleton.len(),
         median_gap_ratio: med,
