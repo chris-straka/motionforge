@@ -19,6 +19,8 @@ OUT=${FLEET_ARTIFACTS:-bench/pro/out}
 TAG=${TAG:-$(date +%F)}
 WEIGHTFORGE=${WEIGHTFORGE:-/nonexistent} bash tools/bench/fetch.sh
 (cd rust && cargo build --locked --release -j "${CORES:-4}" 2>&1 | tail -1)
+# fleet may share a build folder between worktrees (CARGO_TARGET_DIR).
+export MOTIONFORGE_BIN=${CARGO_TARGET_DIR:-$PWD/rust/target}/release/motionforge
 mkdir -p "$FB/targets" "$OUT"
 if [ -n "${3:-}" ]; then
   fleet artifact "$3" "$RIG" -o "$FB/targets/$NAME.glb"
