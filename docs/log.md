@@ -80,3 +80,56 @@ copied outside this repo; never committed). Scores: `motion check
 - **Roughness as `(|a| + |a'| - |a + a'|) / 2`**: nonzero on a fast even
   arc (0.12 mm at 7.5 rad/s, curvature). Replaced by
   `max(0, -a . a') / max(|a|, |a'|)`, exactly 0 on any arc or corner.
+
+## 2026-11-13, round 2: the contact pass
+
+Goal: smooth enough to be on by default in `clean`. Judged on the 31
+clips, `clean --contact` against `clean` without it (base re-scored with
+the round-2 treadmill: skate 355.8).
+
+| measure (sum) | clean | contact, round 1 | + anatomical hinge IK | + rate limit | + free hand | + 0.3 s ramp | + shallow free-arm floor |
+|---|---|---|---|---|---|---|---|
+| through-body frames | 895 | 184 | 184 | 231 | 140 | 114 | 229 |
+| through-body cm (deepest) | 238.0 | 81.1 | 81.1 | 99.3 | 91.6 | 65.9 | 80.1 |
+| back-and-forth mm | 39.9 | 94.2 | 94.2 | 62.1 | 62.3 | 55.4 | 55.5 |
+| joint-limit frames | 245 | 521 | 521 | 509 | 301 | 291 | 291 |
+
+### Kept
+
+- **Anatomical hinge in the IK** (`contact::hinge_axis`: upper bone x
+  facing, carried in the upper bone's frame). The round-1 hinge came from
+  the limb's own bend, which is noise on a nearly straight limb: the
+  elbow could flip between frames (the death's left arm spiked 265 mm).
+  A first try took the axis from the rest pose's bend: Andras's knees
+  rest bent 3 deg partly sideways, and joint-limit frames rose 245 -> 303
+  without contact; the anatomical axis brings them back to 245.
+- **Rate limit on the contact corrections** (0.9 character heights/s,
+  blade turn 3 rad/s): where the surface to clear switches, the chosen
+  offset jumped 40 cm in two frames (the death lying down: pushed out one
+  side, then the other). Death's back-and-forth 9.1 -> 1.0 mm.
+- **A free hand turns with its forearm** (the pass kept every hand's
+  world rotation while moving the wrist up to 24 cm): limit frames
+  509 -> 301, and fewer through-body frames.
+- **0.3 s ease for `clean --contact`** (0.15 s stays `animate`'s): a 20 cm
+  correction eased over 0.15 s flips its acceleration within a frame or
+  two. 0.5 s traded frames for depth without a clear win.
+- **Free arms resting shallower than 2% of height are left alone**
+  (`clean --contact`): pushing a hand off the coat splayed the arm like a
+  puppet (picture, attack_2 and hit). The sword arm is always cleared.
+- `motion check`'s treadmill follows the lowest point across each frame
+  (a heel-to-ball switch read as a foot-length jump).
+
+### Dropped
+
+- Smoothing the corrections' direction (binomial, size kept): no change
+  on any measure.
+- Smoothing the corrections themselves (binomial): shaved the peak off a
+  one-frame contact; the hand stayed in the chest (`contact` test).
+
+### Verdict
+
+Not on by default yet: through-body frames 895 -> 229 (deepest sum
+238 -> 80 cm), but back-and-forth +15.6 mm and joint-limit frames +46
+over the set, and in `hit` the sword hand is held off the body where the
+move swings it across. Next: let a correction move the elbow (not only
+the wrist) for forearm-through-chest, and judge `hit` with the owner.

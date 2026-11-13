@@ -320,8 +320,10 @@ pub fn clean_clip(
                 .map(|l| {
                     (0..n)
                         .map(|f| {
-                            let (nd, h) = lowest(l, &world[f]);
-                            (pos(f, nd), h)
+                            l.points
+                                .iter()
+                                .map(|&(nd, y)| (pos(f, nd), pos(f, nd).y - y))
+                                .collect()
                         })
                         .collect()
                 })

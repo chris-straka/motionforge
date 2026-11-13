@@ -463,12 +463,10 @@ pub fn score(
             .map(|foot| {
                 (0..n)
                     .map(|f| {
-                        let (node, h) = foot
-                            .points
+                        foot.points
                             .iter()
-                            .map(|&(nd, y)| (nd, pos(f, nd).y - y))
-                            .fold((0, f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
-                        (pos(f, node), h)
+                            .map(|&(nd, y)| (pos(f, nd), pos(f, nd).y - y))
+                            .collect()
                     })
                     .collect()
             })
@@ -984,39 +982,48 @@ pub fn score(
 }
 
 /// The treadmill an in-place cycle runs on: per foot, the median
-/// horizontal velocity of its low frames (`low[foot][frame]` = its lowest
-/// point's position and height above standing; `hips` the hips' position
-/// per frame); a belt when the hips travel under `BELT_TRAVEL`, each foot
+/// horizontal velocity of its low frames (`feet[foot][frame][point]` =
+/// each contact point's position and height above standing, the lowest
+/// point followed across each frame; `hips` the hips' position per frame); a belt when the hips travel under `BELT_TRAVEL`, each foot
 /// ends within `BELT_LOOP` of where it started under the hips, and every
 /// foot's median is at least
 /// `BELT_SPEED` and agrees in direction (a single foot skimming the floor
 /// while the other stands is a step, not a belt). Zero otherwise.
-pub fn treadmill(low: &[Vec<(Vec3, f64)>], hips: &[Vec3], dt: f64, k: f64) -> Vec3 {
+pub fn treadmill(feet: &[Vec<Vec<(Vec3, f64)>>], hips: &[Vec3], dt: f64, k: f64) -> Vec3 {
     let n = hips.len();
-    if n < 3 {
+    if n < 3
+        || feet
+            .iter()
+            .any(|f| f.len() != n || f.iter().any(|p| p.is_empty()))
+    {
         return Vec3::ZERO;
     }
     let hips_travel = flat(hips[n - 1] - hips[0]).length();
+    if hips_travel >= BELT_TRAVEL * k {
+        return Vec3::ZERO;
+    }
+    let lowest = |pts: &[(Vec3, f64)]| -> usize {
+        (0..pts.len()).fold(0, |a, i| if pts[i].1 < pts[a].1 { i } else { a })
+    };
     // A cycle ends where it starts: each foot back in the same place
     // under the hips (a lunge that pulls both feet back is not a belt).
-    let loops = low.iter().all(|foot| {
-        foot.len() == n
-            && flat((foot[n - 1].0 - hips[n - 1]) - (foot[0].0 - hips[0])).length() < BELT_LOOP * k
+    let loops = feet.iter().all(|foot| {
+        let i = lowest(&foot[0]);
+        flat((foot[n - 1][i].0 - hips[n - 1]) - (foot[0][i].0 - hips[0])).length() < BELT_LOOP * k
     });
     if !loops {
         return Vec3::ZERO;
     }
     let mut per_foot: Vec<Vec3> = Vec::new();
-    for foot in low {
-        let n = foot.len();
-        if hips_travel >= BELT_TRAVEL * k || n < 3 {
-            return Vec3::ZERO;
-        }
+    for foot in feet {
         let mut vx = Vec::new();
         let mut vz = Vec::new();
         for f in 1..n - 1 {
-            if foot[f].1 < CONTACT_HEIGHT * k {
-                let v = (foot[f + 1].0 - foot[f - 1].0).scale(1.0 / (2.0 * dt));
+            // The point that is lowest on this frame, followed across it
+            // (a heel-to-ball switch is not a foot-length jump).
+            let i = lowest(&foot[f]);
+            if foot[f][i].1 < CONTACT_HEIGHT * k {
+                let v = (foot[f + 1][i].0 - foot[f - 1][i].0).scale(1.0 / (2.0 * dt));
                 vx.push(v.x);
                 vz.push(v.z);
             }

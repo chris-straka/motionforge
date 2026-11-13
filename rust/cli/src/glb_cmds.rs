@@ -230,8 +230,9 @@ pub fn cmd_animate(cmd: &Cmd) -> CmdResult {
             if names.is_empty() {
                 out
             } else {
-                let (o, reps) = stylize_glb(&out, &BodyParams::default(), Mode::Body, &names, None, true)
-                    .map_err(|e| (3, e))?;
+                let (o, reps) =
+                    stylize_glb(&out, &BodyParams::default(), Mode::Body, &names, None, true)
+                        .map_err(|e| (3, e))?;
                 for c in &reps {
                     extra.push_str(&format!("  stylized {}: keys {:?}\n", c.name, c.keys));
                 }
@@ -930,7 +931,13 @@ pub fn cmd_clean(cmd: &Cmd) -> CmdResult {
         ground: !cmd.flag("no-ground"),
         lock: !cmd.flag("no-lock"),
         contact: if cmd.flag("contact") {
-            contact_opts(cmd)?
+            contact_opts(cmd)?.map(|mut o| {
+                if cmd.get("contact-ramp").is_none() {
+                    o.ramp = 0.3;
+                }
+                o.min_depth = 0.02;
+                o
+            })
         } else {
             None
         },
@@ -985,6 +992,18 @@ pub fn cmd_stylize_glb(cmd: &Cmd, base: motion_core::stylize::StylizeParams) -> 
     let params = BodyParams {
         base,
         key_prominence: crate::parse_f64(cmd, "key-prominence", 0.25)?,
+        snap_speed: crate::parse_f64(cmd, "snap-speed", 6.0)?,
+        accent_side: match cmd.get("accent").unwrap_or("R") {
+            "R" | "r" => Some("R".into()),
+            "L" | "l" => Some("L".into()),
+            "none" => None,
+            other => return Err((1, format!("--accent must be R|L|none, got '{}'", other))),
+        },
+        contact: if cmd.flag("contact") {
+            contact_opts(cmd)?
+        } else {
+            None
+        },
         ..BodyParams::default()
     };
     let clips: Vec<String> = cmd
@@ -1012,6 +1031,12 @@ pub fn cmd_stylize_glb(cmd: &Cmd, base: motion_core::stylize::StylizeParams) -> 
             "clip {} (from {}): {} frames, keys {:?}, big {:?}, anticipation {} added {} skipped",
             c.name, c.source, c.frames, c.keys, c.big, c.counters_added, c.counters_skipped
         ));
+        if c.exag_scale < 1.0 {
+            r.push_str(&format!(
+                ", exaggeration x{:.2} (a fast snap)",
+                c.exag_scale
+            ));
+        }
         if replant {
             r.push_str(&format!(
                 ", feet re-planted: {} plants, {} frames, ankle moved up to {:.1} cm",
@@ -1021,6 +1046,9 @@ pub fn cmd_stylize_glb(cmd: &Cmd, base: motion_core::stylize::StylizeParams) -> 
             ));
         }
         r.push('\n');
+        if let Some(ct) = &c.contact {
+            r.push_str(&contact_line(ct));
+        }
     }
     r.push_str(&format!("output: {}\n", output));
     Ok(r)

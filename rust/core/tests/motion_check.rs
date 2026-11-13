@@ -434,12 +434,13 @@ fn joint_limits_catch_backward_knees_and_elbows_only() {
 
 #[test]
 fn an_in_place_cycle_is_scored_on_its_treadmill() {
-    // Hips still, both feet pushed back together at 0.6 m/s: a treadmill
-    // walk's stance. On the world floor that is a 12 cm skate per foot;
-    // on its own treadmill it is no skate at all.
+    // Hips still, both feet pushed back together at 0.6 m/s for 9 frames
+    // (a treadmill walk's stance), then swung forward 15 cm up back to
+    // where they started (it loops). On the world floor the stance is a
+    // 16 cm skate per foot; on its own treadmill it is no skate at all.
     let s = subject();
     let rig = &s.rig;
-    let n = 7;
+    let n = 13;
     let speed = 0.6 * s.k;
     let mut frames = still(rig, n);
     for side in ["L", "R"] {
@@ -450,16 +451,19 @@ fn an_in_place_cycle_is_scored_on_its_treadmill() {
         );
         let fwd = motion_core::animate::forward(rig, &s.map);
         let ankle = rig.head(ft);
+        let stance_end = speed * 8.0 / 30.0;
         for (f, fr) in frames.iter_mut().enumerate() {
-            let back = fwd.scale(-speed * f as f64 / 30.0);
-            solve_arm(
-                rig,
-                fr,
-                th,
-                sh,
-                ft,
-                ankle + back + Vec3::new(0.0, 0.03 * s.k, 0.0),
-            );
+            let (back, up) = if f <= 8 {
+                (speed * f as f64 / 30.0, 0.03 * s.k)
+            } else {
+                let u = (f - 8) as f64 / 4.0;
+                (
+                    stance_end * (1.0 - u),
+                    if f < 12 { 0.15 * s.k } else { 0.03 * s.k },
+                )
+            };
+            let target = ankle + fwd.scale(-back) + Vec3::new(0.0, up, 0.0);
+            solve_arm(rig, fr, th, sh, ft, target);
         }
     }
     let c = score(&s, "walk", &times(n), &frames, false);

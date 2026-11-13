@@ -64,6 +64,8 @@ stylize flags:\n\
   GLB: --mode body|per-bone (default body: shared key poses, one clock, exaggeration\n\
   from the clip's own neutral, feet re-planted)  --clip <name> (repeatable; default all)\n\
   --suffix <s> (keep originals, add <name><s>)  --no-replant  --key-prominence <0..1> (default 0.25)\n\
+  --accent R|L|none (attack clips: that hand's stops are keys too; default R)\n\
+  --snap-speed <m/s> (less exaggeration on clips whose hand is faster; default 6, 0 = off)  --contact\n\
   --exaggeration <0..4> (default 1.35)  --chain <substr:factor> (repeatable)\n\
   --angle-threshold <rad> (default 0.15)  --min-spacing <n> (default 4)\n\
   --hold <n> (default 2)  --anticipation <0..1> (default 0.25)\n\
