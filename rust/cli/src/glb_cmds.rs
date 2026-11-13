@@ -840,13 +840,27 @@ pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
             return Err((2, format!("no clip named '{}'", o)));
         }
     }
-    if cmd.flag("json") {
+    let frames = cmd.flag("tracks");
+    if cmd.flag("json") || frames {
         let j = Json::obj(vec![
             ("height_m", Json::num(round(subject.height, 4))),
             ("scale_k", Json::num(round(subject.k, 4))),
             (
                 "clips",
-                Json::Arr(scores.iter().map(|s| s.to_json()).collect()),
+                Json::Arr(
+                    scores
+                        .iter()
+                        .map(|s| {
+                            let mut j = s.to_json();
+                            if frames {
+                                if let Json::Obj(f) = &mut j {
+                                    f.push(("detail".into(), s.detail_json(subject.k)));
+                                }
+                            }
+                            j
+                        })
+                        .collect(),
+                ),
             ),
         ]);
         return pretty(&j);

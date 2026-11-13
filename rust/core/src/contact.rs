@@ -143,6 +143,8 @@ pub struct Arm {
 #[derive(Clone, Debug)]
 pub struct Body {
     pub height: f64,
+    /// The rest pose's floor: its lowest skinned vertex height, metres.
+    pub floor: f64,
     pub static_parts: Vec<Capsule>,
     pub arms: Vec<Arm>,
     /// Rest-pose depth allowed per (arm index, part index, body index).
@@ -634,6 +636,7 @@ impl Body {
             .collect();
         let mut body = Body {
             height,
+            floor: lo,
             static_parts: parts,
             arms,
             slack: Vec::new(),
@@ -723,6 +726,31 @@ impl Body {
 }
 
 impl Body {
+    /// Height of the posed mesh's lowest vertex (the whole character:
+    /// a body lying or kneeling touches the floor with more than its
+    /// feet), metres.
+    pub fn lowest(&self, world: &[Affine]) -> f64 {
+        let mats: Vec<Affine> = (0..world.len())
+            .map(|j| world[j].mul(&self.inv_rest[j]))
+            .collect();
+        let mut lo = f64::INFINITY;
+        for (v, inf) in self.mesh_inf.iter().enumerate() {
+            let mut y = 0.0;
+            let mut tot = 0.0;
+            for &(j, w) in inf {
+                y += mats[j].apply(self.mesh_rest[v]).y * w;
+                tot += w;
+            }
+            let y = if tot > 0.0 {
+                y / tot
+            } else {
+                self.mesh_rest[v].y
+            };
+            lo = lo.min(y);
+        }
+        lo
+    }
+
     /// Exact check for one arm in one pose: arm vertices (forearm, hand)
     /// and blade sample points inside the body mesh (generalized winding
     /// number over the body triangles, so the open cuts at the neck,

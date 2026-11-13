@@ -75,6 +75,7 @@ stylize flags:\n\
 motion check flags (also: motion-check --input <glb>):\n\
   motion check <rigged glb> [--clip NAME] (repeatable) [--json] [--fps <n>]\n\
   [--weapon R|L|none] [--weapon-clips <a,b>] [--attack-clips <a,b>]\n\
+  [--tracks] (JSON with per-frame tracks: plants, contact points, hips, through, limits)\n\
 \n\
 physics-frame flags:\n\
   --input <clip> --frame <n> --root <bone> --feet <a,b,...>\n\
@@ -191,6 +192,7 @@ fn is_bool_flag(key: &str) -> bool {
             | "twisted"
             | "no-contact"
             | "json"
+            | "tracks"
             | "no-replant"
             | "no-ground"
             | "no-lock"
