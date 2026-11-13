@@ -210,7 +210,19 @@ rejected, and rightly.** Same detections as 2026-11-11 (fleet job
 | bone-frames held at a limit (forced) | 369 | 120 |
 
 The camera fit is worth keeping on for every generated clip: the rays
-now cross (residual 112 -> 13 mm). The time slide finds nothing because
+now cross (residual 112 -> 13 mm). Rendered on the wolf through both
+cameras beside the video (`python/creature/render.py --mode motion`,
+y8, every 6th frame of the first 48; local `bench/creature-video/`),
+the forced solve with the fit stands on the floor and steps as the
+video does (`tools/creature_feet.py --creature creature.json
+clip.json`): lowest foot joint 11-30 mm over the clip (rest 22-26 mm),
+three lifts over 3 cm per front foot in 5 s; without the fit the whole
+wolf sinks, feet 3-16 cm under the floor (the 640/512 px scale). Its
+weak part is where the views disagree: the hind feet wobble sideways
+20-23 mm (sd) against 4 mm for the front feet, and the hind-left foot
+counts six lifts to the others' three. (A render from the clip's own
+two cameras matches each view's detections by construction, so the
+sideways wobble is the honest number.) The time slide finds nothing because
 the clip is not out of step: the motion ratio over constant lags has its
 minimum at 0 (`tools/creature_views.py`: -12: 8.65, -4: 2.07, -2: 1.35,
 0: 1.14, +2: 1.31, +4: 1.69, +12: 4.05), and even letting every leg and

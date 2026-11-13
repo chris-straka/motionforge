@@ -219,6 +219,8 @@ biped (2 min). Meshes, rigs, renders and weights stay local.
   r.json --align-views --align-time auto [--aligned-out a.json]` (and
   `--align-time lag|warp`, `--force` for the residual) and `python3
   tools/creature_views.py --creature creature.json --detections a.json`.
+  Feet of a solved clip: `python3 tools/creature_feet.py --creature
+  creature.json clip.json`; renders: `render.py --mode motion` on y8.
   Numbers in `docs/creature.md` ("Lining up the views") and
   `docs/log.md`.
 

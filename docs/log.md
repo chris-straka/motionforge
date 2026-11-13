@@ -181,6 +181,12 @@ views"), each judged on known answers first
 | warp (`--align-time warp`, chosen by `auto` only when 10% better than the lag) | 8% slow view: warp 0.033 vs lag 0.080, chosen | 1.049 (lag -3.0..3.4), not 10% better | **kept** (wins on a drifting view) |
 | frame timing (`times`, detect.py via ffprobe) | every fifth frame dropped: resampled to 50, within 6 px | timestamps uniform, nothing to do | **kept** |
 
+The forced solve with the fit, rendered on the wolf beside the video,
+stands on the floor (lowest foot joint 11-30 mm, rest 22-26) and steps
+with the video (three lifts per front foot); without the fit the feet
+are 3-16 cm under the floor. The hind feet wobble sideways 20-23 mm
+(front 4 mm).
+
 Still rejected (motion ratio 1.14), and rightly: the ratio over constant
 lags has its minimum at 0 (-4: 2.07, 0: 1.14, +4: 1.69), every leg at its
 own best lag only reaches 0.80, following the front view's zoom drift
