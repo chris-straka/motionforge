@@ -56,6 +56,18 @@ pub struct BodyParams {
     pub key_prominence: f64,
     /// Frames at each end where exaggeration ramps in/out.
     pub end_ramp: usize,
+    /// Exaggeration is scaled by `min(1, snap_speed / peak)`, `peak` the
+    /// accent's (weapon hand's) top speed in m/s on a 1.75 m body: a clip
+    /// that is already a fast snap gets less (on the game's keyed attacks,
+    /// hand 12-13 m/s, full exaggeration pushed the forearm through the
+    /// chest and added roughness). 0 = no scaling.
+    pub snap_speed: f64,
+    /// Hand whose stops also make keys on attack clips (names with
+    /// attack, slash, cut, ...: `motioncheck::ATTACK_WORDS`), and whose top
+    /// speed scales exaggeration there.
+    pub accent_side: Option<String>,
+    /// The contact pass after stylizing (arms out of the body), when given.
+    pub contact: Option<crate::contact::Options>,
 }
 
 impl Default for BodyParams {
@@ -64,6 +76,9 @@ impl Default for BodyParams {
             base: StylizeParams::default(),
             key_prominence: 0.25,
             end_ramp: 4,
+            snap_speed: 6.0,
+            accent_side: Some("R".into()),
+            contact: None,
         }
     }
 }
@@ -77,6 +92,12 @@ pub struct Track {
     pub loc: Vec<Vec<Vec3>>,
     pub factor: Vec<f64>,
     pub probes: Vec<Vec<Vec3>>,
+    /// Optional accent probes (hips first, then e.g. the weapon hand): its
+    /// own speed minima become keys too (the body's speed can miss the
+    /// arm's widest point), and its top speed scales exaggeration.
+    pub accent: Option<Vec<Vec<Vec3>>>,
+    /// Metres per reference body (height / 1.75) for `snap_speed`.
+    pub scale_k: f64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -88,6 +109,8 @@ pub struct BodyReport {
     pub counters_skipped: usize,
     /// Source frame (fractional) shown at each output frame.
     pub warp: Vec<f64>,
+    /// Share of the exaggeration used (the snap scaling).
+    pub exag_scale: f64,
 }
 
 fn ease_out(u: f64) -> f64 {
@@ -257,10 +280,40 @@ pub fn stylize_body(
     }
     let raw = raw_speed(&track.probes, track.fps);
     let speed = smooth3(&raw);
-    let keys = body_keys(&raw, params.key_prominence, p.min_spacing);
+    let mut keys = body_keys(&raw, params.key_prominence, p.min_spacing);
+    let mut exag_scale = 1.0;
+    if let Some(acc) = &track.accent {
+        let araw = raw_speed(acc, track.fps);
+        // The accent's own stops, where the body's keys leave room.
+        for k in body_keys(&araw, params.key_prominence, p.min_spacing) {
+            if keys.iter().all(|&b| b.abs_diff(k) >= p.min_spacing) {
+                keys.push(k);
+            }
+        }
+        keys.sort_unstable();
+        if params.snap_speed > 0.0 {
+            // The accent's top speed relative to the hips (probe 1 on).
+            let n = acc.len();
+            let mut top: f64 = 0.0;
+            for f in 1..n.saturating_sub(1) {
+                for j in 1..acc[f].len() {
+                    let v = ((acc[f + 1][j] - acc[f + 1][0]) - (acc[f - 1][j] - acc[f - 1][0]))
+                        .length()
+                        * track.fps
+                        / 2.0;
+                    top = top.max(v);
+                }
+            }
+            let top = top / track.scale_k.max(1e-9);
+            if top > params.snap_speed {
+                exag_scale = params.snap_speed / top;
+            }
+        }
+    }
     let top = speed.iter().cloned().fold(0.0, f64::max);
     let mut report = BodyReport {
         keys: keys.clone(),
+        exag_scale,
         ..Default::default()
     };
     // Per output frame: source time; anticipation weight and its segment;
@@ -371,7 +424,7 @@ pub fn stylize_body(
             if st.over > 0.0 {
                 q = q.mul(Quat::IDENTITY.slerp(delta(st.over_seg), st.over));
             }
-            let f = 1.0 + (track.factor[b] - 1.0) * w_ex;
+            let f = 1.0 + (track.factor[b] - 1.0) * w_ex * exag_scale;
             if (f - 1.0).abs() > 1e-12 {
                 let rel = neutral[b].conj().mul(q);
                 q = neutral[b].mul(Quat::IDENTITY.slerp(rel, f));
@@ -406,6 +459,9 @@ pub struct GlbClipReport {
     pub plants: usize,
     pub replant_frames: usize,
     pub replant_max_m: f64,
+    /// Share of the exaggeration used (snap scaling; 1 = all).
+    pub exag_scale: f64,
+    pub contact: Option<crate::contact::ClipContact>,
 }
 
 /// Probe joints for the body-speed signal (hips first).
@@ -453,6 +509,24 @@ pub fn stylize_glb(
         }
     }
     let probes = probe_nodes(&map);
+    let accent_hand = params
+        .accent_side
+        .as_ref()
+        .and_then(|side| map.node_of(&format!("DEF-hand.{side}")));
+    let words: Vec<String> = crate::motioncheck::ATTACK_WORDS
+        .iter()
+        .map(|w| w.to_string())
+        .collect();
+    let scale_k = {
+        let ys: Vec<f64> = rig.joints().iter().map(|&j| rig.head(j).y).collect();
+        let lo = ys.iter().cloned().fold(f64::INFINITY, f64::min);
+        let hi = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        ((hi - lo) * 1.08 / crate::motioncheck::REF_HEIGHT).max(1e-6)
+    };
+    let body = match &params.contact {
+        Some(o) => crate::contact::Body::build(doc, &rig, o)?,
+        None => None,
+    };
     let mut out = doc.clone();
     let mut reports = Vec::new();
     let mut new_anims: Vec<(usize, crate::json::Json, String)> = Vec::new();
@@ -460,6 +534,7 @@ pub fn stylize_glb(
         if !clips.is_empty() && !clips.contains(&anim.name) {
             continue;
         }
+        let attack = crate::motioncheck::is_attack(&anim.name, &words);
         let (times, frames) = crate::motioncheck::sample(&rig, anim, None);
         let n = frames.len();
         if n < 2 {
@@ -476,6 +551,7 @@ pub fn stylize_glb(
             .iter()
             .map(|&nd| params.base.factor_for(&rig.names[nd]))
             .collect();
+        let mut exag_scale = 1.0;
         let (rot, loc, keys, big, added, skipped, warp) = match mode {
             Mode::Body => {
                 let world: Vec<_> = frames.iter().map(|f| rig.world(f)).collect();
@@ -491,8 +567,15 @@ pub fn stylize_glb(
                     probes: (0..n)
                         .map(|f| probes.iter().map(|&p| world[f][p].t).collect())
                         .collect(),
+                    accent: accent_hand.filter(|_| attack).map(|h| {
+                        (0..n)
+                            .map(|f| vec![world[f][hips].t, world[f][h].t])
+                            .collect()
+                    }),
+                    scale_k,
                 };
                 let (rot, loc, rep) = stylize_body(&track, params)?;
+                exag_scale = rep.exag_scale;
                 (
                     rot,
                     loc,
@@ -581,6 +664,17 @@ pub fn stylize_glb(
         } else {
             (0, 0, 0.0)
         };
+        // Arms out of the body (exaggeration pushes them in).
+        let contact = match (&body, &params.contact) {
+            (Some(b), Some(o)) => {
+                let c = crate::contact::fix_clip(b, &rig, &mut posed, &times, &anim.name, o);
+                for f in posed.iter_mut() {
+                    crate::helpers::drive(&rig, f);
+                }
+                Some(c)
+            }
+            _ => None,
+        };
         let name = match suffix {
             Some(s) => format!("{}{}", anim.name, s),
             None => anim.name.clone(),
@@ -619,6 +713,8 @@ pub fn stylize_glb(
             plants,
             replant_frames,
             replant_max_m: replant_max,
+            exag_scale,
+            contact,
         });
     }
     let list = out.array_mut("animations");
@@ -845,6 +941,8 @@ mod tests {
                 .iter()
                 .map(|a| vec![Vec3::ZERO, Vec3::new(a.cos(), a.sin(), 0.0)])
                 .collect(),
+            accent: None,
+            scale_k: 1.0,
         }
     }
 
@@ -862,6 +960,7 @@ mod tests {
             },
             key_prominence: 0.25,
             end_ramp: 4,
+            ..BodyParams::default()
         }
     }
 
