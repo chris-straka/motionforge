@@ -139,6 +139,118 @@ feet sliding; kept to set beside `walk`) are plain forward kinematics.
 `--clips-json DIR` also writes each clip as `DIR/<name>.clip.json` for
 `python/creature/render.py --mode motion`.
 
+## Lining up the views of a generated video
+
+A video model is handed the start picture and returns a clip that need
+not keep to it. `creature-solve` can line the two halves up before it
+triangulates (`creature::align`; all off by default, so the exam and the
+goldens are unchanged):
+
+- **`--align-views`: the cameras re-fitted on the first frame.** Per
+  view, a zoom about the image centre and a shift (three numbers) that
+  take the rest pose, projected through the profile's camera, onto the
+  finder's joints on frame `--align-frame` (0: the start picture, where
+  the creature still stands at rest); confidence-weighted least squares,
+  five reweighting rounds so a misplaced joint doesn't pull it. Every
+  frame of that view is then mapped back through it. A zoom outside
+  0.5..2 refuses (the frame is probably not the rest pose).
+- **`--align-time lag|warp|auto`: one view slid in time against the
+  other** (the second of the pair; up to `--max-lag 12` frames, capped
+  at a quarter of the clip). `lag` tries every whole-frame lag, keeps the
+  one with the lowest height-disagreement motion ratio (the solve's own
+  check), then refines it to a fraction of a frame (parabola through the
+  neighbours; kept only when it measures lower). `warp` is dynamic time
+  warping on height, the one coordinate two orthogonal views share: per
+  frame and lag, each joint's signed height disagreement between the two
+  rays less its mean along the best constant lag, over the joints'
+  height variance; one lag per frame, moving at most a frame per frame
+  at a cost of 0.1 a step, solved exactly (Viterbi), smoothed (sigma 2
+  frames). `auto` takes the constant lag when it lowers the ratio and
+  the warp only when its ratio is under 90% of the constant lag's (it
+  has more freedom). Frames whose partner falls outside the clip are
+  dropped; the report says how many and from where.
+- **The clip's own frame timing.** `detect.py` writes the video's
+  timestamps (`times`, from ffprobe) into the detections; a clip whose
+  timestamps are more than a quarter frame off a uniform grid is
+  resampled to its fps before anything else.
+- `detect.py` now writes positions in each view's own pixels (the
+  profile's `width`/`height`). Before, it wrote them in the pixels of the
+  video's half, and the first real clip's halves were 640 px for 512 px
+  views; the camera fit absorbs that too (zoom 1.25 and a 64 px shift).
+- `--aligned-out det.json` writes the detections after lining up, and
+  `tools/creature_views.py` (stdlib) says where two views disagree: the
+  motion ratio at a range of lags, per leg (each foot's chain) and for
+  the rest of the body the ratio at lag 0 and at its own best lag, the
+  finder's confidence per view, and the pooled ratio with every group at
+  its own best lag.
+
+Known answers (`rust/core/tests/creature_align.rs`, the fixture biped,
+1 px noise; `cargo test --locked --release -p motion_core --test
+creature_align -- --nocapture`, f, 2026-11-13):
+
+| case | before | after |
+|---|---|---|
+| side view 5 frames late (`lag` and `auto`) | motion ratio 0.602, rejected | lag 5.06 frames, ratio 0.019, accepted, joints 6.0 mm from the truth |
+| side view playing 8% slow (lag 0 -> 7.7 frames) | ratio 0.442 | constant lag 4.43 frames: 0.080; warp (lag 2..6): 0.033, chosen by `auto` |
+| front zoomed 1.25 and shifted (30, -12) px, side 0.9 and (-8, 15) | median ray gap 14.7% | fit 1.2467, (30.13, -11.94) and 0.8984, (-7.92, 15.07); frame-0 rms 43.6 -> 1.56 and 20.3 -> 0.85 px; gap 0.36% (untouched clip 0.34%) |
+| both halves read at 640 px for 512 px views, side 6 frames late (1.5 px noise, 2% lost) | gap 5.33%, ratio 0.604, rejected | gap 0.54%, ratio 0.079, accepted, lag within a frame of 6 |
+| two different moves, one per view | rejected | still rejected under `lag`, `warp` and `auto` |
+| every fifth frame dropped, timestamps kept | 40 frames | resampled to 50, every joint within 6 px of the full clip |
+
+**The Seedance wolf walk with the views lined up (2026-11-13): still
+rejected, and rightly.** Same detections as 2026-11-11 (fleet job
+`vvyr2dq3` on f), `creature-solve --align-views --align-time auto`:
+
+| | as read | lined up |
+|---|---|---|
+| camera fit (frame 0) | - | front zoom 1.195, shift (64.6, 61.5) px; side 1.249, (63.8, 64.8); rest-pose fit 89.3 -> 8.6 and 91.5 -> 8.6 px rms |
+| median ray gap | 4.69% of the height | 2.67% |
+| motion ratio (limit 0.50) | 1.142 | 1.143 (lag -0.38 frames; warp 1.049, lag -3.0..3.4, not 10% better) |
+| fit residual (forced solve) | 112.4 mm rms | 13.0 mm |
+| bone-frames held at a limit (forced) | 369 | 120 |
+
+The camera fit is worth keeping on for every generated clip: the rays
+now cross (residual 112 -> 13 mm). Rendered on the wolf through both
+cameras beside the video (`python/creature/render.py --mode motion`,
+y8, every 6th frame of the first 48; local `bench/creature-video/`),
+the forced solve with the fit stands on the floor and steps as the
+video does (`tools/creature_feet.py --creature creature.json
+clip.json`): lowest foot joint 11-30 mm over the clip (rest 22-26 mm),
+three lifts over 3 cm per front foot in 5 s; without the fit the whole
+wolf sinks, feet 3-16 cm under the floor (the 640/512 px scale). Its
+weak part is where the views disagree: the hind feet wobble sideways
+20-23 mm (sd) against 4 mm for the front feet, and the hind-left foot
+counts six lifts to the others' three. (A render from the clip's own
+two cameras matches each view's detections by construction, so the
+sideways wobble is the honest number.) The time slide finds nothing because
+the clip is not out of step: the motion ratio over constant lags has its
+minimum at 0 (`tools/creature_views.py`: -12: 8.65, -4: 2.07, -2: 1.35,
+0: 1.14, +2: 1.31, +4: 1.69, +12: 4.05), and even letting every leg and
+the body take its own best lag only reaches 0.80. Its timestamps are
+uniform (ffprobe: every step 1/24 s), so the frame timing changes
+nothing either. Two more things measured and ruled out: following the
+front view's slow zoom drift (1.187 at frame 0 to 1.217 at 120,
+per-frame fit smoothed over 6, 12 or 24 frames: ratio 1.21, 1.15, 1.15),
+and weighting the ratio by the finder's confidence (1.00, or 0.85 with
+confidence squared).
+
+What the disagreement follows is what each view can see. Per leg, ratio
+at lag 0 and the finder's mean confidence front / side: front right
+(seen in both) 0.33, 0.96 / 0.94; front left (behind the near legs in
+the side view) 0.64, 0.93 / 0.89; hind right (behind the front legs in
+the front view) 1.20, 0.44 / 0.99; hind left (hidden in both) 1.61,
+0.45 / 0.90; the rest of the body (spine and tail behind the chest in
+the front view) 1.41, 0.66 / 0.97. The pictures agree: in the front view
+the hind paws stand behind the front ones, and the side view's far legs
+are behind the near ones (`bench/creature-video/`, local). So the score
+and the pictures agree and the benchmark stands; the joints one view
+guesses are what reject the clip. What it would take: solve a joint
+seen well in one view only from that view's ray and its bone length
+(the confidence is already there for the front view, 0.3-0.6 on hidden
+joints, but the side view is sure of its far legs, 0.9), or film the
+start frame from two views that each see all four feet (front-left and
+rear-right three-quarters), or prompt and choose clips by this check.
+
 ## Formats
 
 - `motionforge-creature` v1: `name`, `height`, `ground`, `forward`
@@ -146,7 +258,9 @@ feet sliding; kept to set beside `walk`) are plain forward kinematics.
   (`name, parent, head, tail, max_angle_deg`; same skeleton rules as
   `motionforge-skeleton`), `views` (`name, position, look_at,
 fov_y_deg, width, height`; pixel origin top-left of each view).
-- `motionforge-detections` v1: `fps`, `views`, `joints`, `frames` =
+- `motionforge-detections` v1: `fps`, `views`, `joints`, optional
+  `times` (one presentation time in seconds per frame, increasing),
+  `frames` =
   `[[ [u, v, confidence] per joint ] per view] per frame`, pixels of
   the view's own image; confidence 0 = missing.
 - `motionforge-render-truth` v1 (render.py): per sample the clip frame
@@ -174,11 +288,12 @@ fov_y_deg, width, height`; pixel origin top-left of each view).
   12 epochs, 1,252 s on the 8 GB card) held out at 8.46 px mean, 5.19 px
   median; on the clip the mean confidence was 0.82. `creature-solve`
   refused it: median ray gap 4.7% of the height (limit 8%), but the
-  height-disagreement motion ratio was 1.14 (limit 0.50): the legs in
-  the two views are out of step. Not built yet, and what the next clip
-  needs: one view slid in time against the other (dynamic time warping
-  on joint heights), the cameras re-aligned on the first frame (the
-  video model re-frames the start picture), and the clip's real frame
-  timing.
+  height-disagreement motion ratio was 1.14 (limit 0.50): the two
+  views disagree about the legs (first read as out of step). The view
+  alignment built for it (camera fit, time slide, frame timing;
+  "Lining up the views")
+  brings the ray gap to 2.67% and the residual from 112 to 13 mm but
+  leaves the ratio at 1.14: the disagreement is the legs each view
+  hides, not timing.
 - The exam films through Blender, the same renderer the finder trained
   on; real video shifts the domain (the degradation is the hedge).

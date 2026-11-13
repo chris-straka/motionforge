@@ -212,6 +212,17 @@ biped (2 min). Meshes, rigs, renders and weights stay local.
   settings; the video step stays pluggable (`detect.py --video` reads
   any composite clip). Untried: more steps, higher guidance, a looser
   prompt, the paid models.
+- Lining up the views (2026-11-13, f): known answers by `cargo test
+  --locked --release -p motion_core --test creature_align -- --nocapture`;
+  the Seedance wolf walk by `motionforge creature-solve --creature
+  creature.json --detections walk_det.json --output out.json --report
+  r.json --align-views --align-time auto [--aligned-out a.json]` (and
+  `--align-time lag|warp`, `--force` for the residual) and `python3
+  tools/creature_views.py --creature creature.json --detections a.json`.
+  Feet of a solved clip: `python3 tools/creature_feet.py --creature
+  creature.json clip.json`; renders: `render.py --mode motion` on y8.
+  Numbers in `docs/creature.md` ("Lining up the views") and
+  `docs/log.md`.
 
 ## Pending owner gates (not runnable here)
 
