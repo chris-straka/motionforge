@@ -75,6 +75,10 @@ stylize flags:\n\
 motion check flags (also: motion-check --input <glb>):\n\
   motion check <rigged glb> [--clip NAME] (repeatable) [--json] [--fps <n>]\n\
   [--weapon R|L|none] [--weapon-clips <a,b>] [--attack-clips <a,b>]\n\
+  [--camera game] readability at the game's follow camera (3 m back, 1.535 m\n\
+    focus, pitch -0.32 rad, 75 deg): [--cam-yaw <deg>] [--stature <m> (2)]\n\
+    [--blade-length <m> (0.91)] [--blade-width <m> (0.05)] [--blade-pose game|socket]\n\
+    [--neutral <clip> (default: each clip's first frame)] [--silhouettes <dir> (a PGM mask per frame)]\n\
 \n\
 physics-frame flags:\n\
   --input <clip> --frame <n> --root <bone> --feet <a,b,...>\n\

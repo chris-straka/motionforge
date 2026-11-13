@@ -802,6 +802,84 @@ pub fn adapter_main(argv: &[String]) -> i32 {
     }
 }
 
+/// `motion check --camera game`: readability of each scored clip at the
+/// game's follow camera (`motion_core::readcam`).
+fn read_at_camera(
+    cmd: &Cmd,
+    cam: &str,
+    doc: &Document,
+    subject: &motion_core::motioncheck::Subject,
+    scores: &mut [motion_core::motioncheck::ClipScore],
+    fps: Option<f64>,
+) -> Result<(), (i32, String)> {
+    use motion_core::motioncheck::sample;
+    use motion_core::readcam::{BladePose, CamOptions, Stage};
+    use motion_core::rig::Animation;
+    if cam != "game" {
+        return Err((1, format!("--camera must be game, got '{}'", cam)));
+    }
+    let mut o = CamOptions::default();
+    o.yaw_deg = crate::parse_f64(cmd, "cam-yaw", o.yaw_deg)?;
+    o.stature_m = crate::parse_f64(cmd, "stature", o.stature_m)?;
+    o.blade_to_m = crate::parse_f64(cmd, "blade-length", o.blade_to_m)?;
+    o.blade_width_m = crate::parse_f64(cmd, "blade-width", o.blade_width_m)?;
+    if let Some(p) = cmd.get("blade-pose") {
+        o.blade_pose = match p {
+            "game" => BladePose::Game,
+            "socket" => BladePose::Socket,
+            other => {
+                return Err((
+                    1,
+                    format!("--blade-pose must be game|socket, got '{}'", other),
+                ))
+            }
+        };
+    }
+    if !(0.0..=10.0).contains(&o.stature_m) || !(0.0..=5.0).contains(&o.blade_to_m) {
+        return Err((
+            1,
+            "--stature must be in 0..10 and --blade-length in 0..5".into(),
+        ));
+    }
+    let stage = Stage::new(doc, subject, &o).map_err(|e| (3, e))?;
+    let anims = Animation::load_all(doc).map_err(|e| (3, e))?;
+    // Neutral: each clip's own first frame, or `--neutral <clip>`'s.
+    let neutral = match cmd.get("neutral") {
+        Some(want) => Some(
+            anims
+                .iter()
+                .find(|a| a.name == want)
+                .map(|a| sample(&subject.rig, a, fps).1.swap_remove(0))
+                .ok_or((2, format!("no clip named '{}' for --neutral", want)))?,
+        ),
+        None => None,
+    };
+    let dir = cmd.get("silhouettes");
+    for sc in scores.iter_mut() {
+        let Some(anim) = anims.iter().find(|a| a.name == sc.name) else {
+            continue;
+        };
+        let (times, frames) = sample(&subject.rig, anim, fps);
+        let dt = if times.len() > 1 {
+            (times[times.len() - 1] - times[0]) / (times.len() - 1) as f64
+        } else {
+            1.0 / 30.0
+        };
+        let base = neutral.clone().unwrap_or_else(|| frames[0].clone());
+        let (rc, shots) = stage.read(&subject.rig, &frames, dt, &base);
+        if let Some(d) = dir {
+            std::fs::create_dir_all(d).map_err(|e| (3, e.to_string()))?;
+            for (f, s) in shots.iter().enumerate() {
+                let path = format!("{}/{}.{:04}.pgm", d, sc.name, f);
+                std::fs::write(&path, s.body.to_pgm(s.blade.as_ref()))
+                    .map_err(|e| (3, e.to_string()))?;
+            }
+        }
+        sc.read_cam = Some(rc);
+    }
+    Ok(())
+}
+
 /// `motionforge motion check <glb>`: score every clip of a rigged GLB
 /// (`motion_core::motioncheck`; `docs/motion-check.md`).
 pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
@@ -834,7 +912,10 @@ pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
         }
         None => None,
     };
-    let (subject, scores) = check_doc(&doc, &opts, &only, &words, fps).map_err(|e| (3, e))?;
+    let (subject, mut scores) = check_doc(&doc, &opts, &only, &words, fps).map_err(|e| (3, e))?;
+    if let Some(cam) = cmd.get("camera") {
+        read_at_camera(cmd, cam, &doc, &subject, &mut scores, fps)?;
+    }
     for o in &only {
         if !scores.iter().any(|s| &s.name == o) {
             return Err((2, format!("no clip named '{}'", o)));

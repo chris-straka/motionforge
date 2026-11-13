@@ -146,6 +146,11 @@ struct Cap {
 }
 
 impl Subject {
+    /// His facing at rest, horizontal (both feet heel to toe).
+    pub fn forward(&self) -> Vec3 {
+        self.forward
+    }
+
     pub fn new(doc: &Document, opts: &Options) -> Result<Subject, String> {
         let rig = Rig::from_doc(doc)?;
         let map = humanoid::map_rig(&rig);
@@ -423,6 +428,8 @@ pub struct ClipScore {
     pub limits: LimitScore,
     pub read: ReadScore,
     pub attack: Option<AttackScore>,
+    /// Readability at the game camera (`readcam`), when asked for.
+    pub read_cam: Option<crate::readcam::ReadCam>,
 }
 
 fn flat(v: Vec3) -> Vec3 {
@@ -894,45 +901,23 @@ pub fn score(
                     Some(c) => world[f][c.bone].apply(c.b),
                     None => pos(f, hand),
                 };
-                let vel = |p: &dyn Fn(usize) -> Vec3, f: usize| -> Vec3 {
+                let hand_v: Vec<Vec3> = (0..n).map(|f| pos(f, hand)).collect();
+                let tip_v: Vec<Vec3> = (0..n).map(tip).collect();
+                let hand_speed: Vec<f64> = (0..n)
+                    .map(|f| {
+                        let (a, b) = (f.saturating_sub(1), (f + 1).min(n - 1));
+                        (hand_v[b] - hand_v[a])
+                            .scale(1.0 / ((b - a) as f64 * dt))
+                            .length()
+                    })
+                    .collect();
+                let tip_speed = |f: usize| {
                     let (a, b) = (f.saturating_sub(1), (f + 1).min(n - 1));
-                    (p(b) - p(a)).scale(1.0 / ((b - a) as f64 * dt))
+                    (tip_v[b] - tip_v[a])
+                        .scale(1.0 / ((b - a) as f64 * dt))
+                        .length()
                 };
-                let hand_p = |f: usize| pos(f, hand);
-                let hand_speed: Vec<f64> = (0..n).map(|f| vel(&hand_p, f).length()).collect();
-                let tip_speed: Vec<f64> = (0..n).map(|f| vel(&tip, f).length()).collect();
-                let mut peak_frame = 0;
-                for f in 0..n {
-                    if tip_speed[f] > tip_speed[peak_frame] {
-                        peak_frame = f;
-                    }
-                }
-                let dir = vel(&tip, peak_frame).normalized();
-                let win = ((1.0 / dt).round() as usize).max(1);
-                let lo = peak_frame.saturating_sub(win);
-                // Load: the last frame before the peak where the hand still
-                // moved against (or across) the strike; else the slowest
-                // hand frame in the second before it.
-                let mut load = peak_frame;
-                for f in (lo..peak_frame).rev() {
-                    if vel(&hand_p, f).dot(dir) <= 0.0 {
-                        load = f;
-                        break;
-                    }
-                }
-                if load == peak_frame {
-                    for f in lo..peak_frame {
-                        if load == peak_frame || hand_speed[f] < hand_speed[load] {
-                            load = f;
-                        }
-                    }
-                }
-                // Windup: frames leading into the load where the hand moved
-                // against the strike direction.
-                let mut w = load;
-                while w > 0 && vel(&hand_p, w - 1).dot(dir) < 0.0 {
-                    w -= 1;
-                }
+                let (peak_frame, load, w) = strike_timing(&hand_v, &tip_v, dt);
                 let peak_hand = hand_speed.iter().cloned().fold(0.0, f64::max);
                 let mut hold = 0;
                 let mut f = peak_frame + 1;
@@ -952,7 +937,7 @@ pub fn score(
                     peak_frame,
                     peak_s: times[peak_frame] - times[0],
                     hand_peak_mps: peak_hand / k,
-                    tip_peak_mps: tip_speed[peak_frame] / k,
+                    tip_peak_mps: tip_speed(peak_frame) / k,
                     load_frame: load,
                     windup_s: (load - w) as f64 * dt,
                     strike_s: (peak_frame - load) as f64 * dt,
@@ -978,7 +963,56 @@ pub fn score(
         limits,
         read,
         attack,
+        read_cam: None,
     }
+}
+
+/// A strike's frames from the weapon hand's and the tip's positions per
+/// frame (`dt` apart): the tip's fastest frame (peak); the load, the last
+/// frame in the second before the peak where the hand still moved against
+/// (or across) the strike's direction, else the slowest hand frame in that
+/// second; and where the windup leading into the load began (frames where
+/// the hand moved against the strike). Velocities are central
+/// differences.
+pub fn strike_timing(hand: &[Vec3], tip: &[Vec3], dt: f64) -> (usize, usize, usize) {
+    let n = hand.len().min(tip.len());
+    if n == 0 {
+        return (0, 0, 0);
+    }
+    let vel = |p: &[Vec3], f: usize| -> Vec3 {
+        let (a, b) = (f.saturating_sub(1), (f + 1).min(n - 1));
+        (p[b] - p[a]).scale(1.0 / ((b - a) as f64 * dt))
+    };
+    let hand_speed: Vec<f64> = (0..n).map(|f| vel(hand, f).length()).collect();
+    let tip_speed: Vec<f64> = (0..n).map(|f| vel(tip, f).length()).collect();
+    let mut peak = 0;
+    for f in 0..n {
+        if tip_speed[f] > tip_speed[peak] {
+            peak = f;
+        }
+    }
+    let dir = vel(tip, peak).normalized();
+    let win = ((1.0 / dt).round() as usize).max(1);
+    let lo = peak.saturating_sub(win);
+    let mut load = peak;
+    for f in (lo..peak).rev() {
+        if vel(hand, f).dot(dir) <= 0.0 {
+            load = f;
+            break;
+        }
+    }
+    if load == peak {
+        for f in lo..peak {
+            if load == peak || hand_speed[f] < hand_speed[load] {
+                load = f;
+            }
+        }
+    }
+    let mut w = load;
+    while w > 0 && vel(hand, w - 1).dot(dir) < 0.0 {
+        w -= 1;
+    }
+    (peak, load, w)
 }
 
 /// The treadmill an in-place cycle runs on: per foot, the median
@@ -1241,6 +1275,9 @@ impl ClipScore {
                 ]),
             ));
         }
+        if let Some(rc) = &self.read_cam {
+            fields.push(("read_cam", rc.to_json()));
+        }
         Json::obj(fields)
     }
 
@@ -1318,6 +1355,9 @@ impl ClipScore {
                 a.root_travel_m * 100.0,
                 a.root_reach_m * 100.0
             ));
+        }
+        if let Some(rc) = &self.read_cam {
+            s.push_str(&rc.line());
         }
         s
     }

@@ -21,6 +21,7 @@ pub mod math;
 pub mod motioncheck;
 pub mod physics;
 pub mod posetest;
+pub mod readcam;
 pub mod retarget;
 pub mod rig;
 pub mod standardize;
