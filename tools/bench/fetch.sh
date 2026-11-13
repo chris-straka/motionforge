@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetch the CC0 clip library for tools/bench/bench.py (outside the repo).
+# Fetch the CC0 clip library for tools/bench/bench.py and pro_bench.py (outside the repo).
 #   Quaternius Universal Animation Library 1 + 2 [Standard], CC0 1.0
 #   (itch.io free downloads; License.txt in each zip). Checksums match the
 #   asset provenance log (~/Games/_tools/asset-pipeline.md).
@@ -18,6 +18,6 @@ get https://quaternius.itch.io/universal-animation-library "[Standard]" ual1_sta
 get https://quaternius.itch.io/universal-animation-library-2 "[Standard]" ual2_standard.zip \
     4008ea208a604773a2b2177d965f0f5d3195498b5bf838c3f5785d68e95f2a68
 unzip -o -j -q "$FB/dl/ual1_standard.zip" "*/Unreal-Godot/UAL1_Standard_RM.glb" "*/License.txt" -d "$FB/clips"
-unzip -o -j -q "$FB/dl/ual2_standard.zip" "*/Unreal-Godot/Mannequin_F.glb" -d "$FB/clips/ual2"
+unzip -o -j -q "$FB/dl/ual2_standard.zip" "*/Unreal-Godot/Mannequin_F.glb" "*/Unreal-Godot/UAL2_Standard_RM.glb" -d "$FB/clips/ual2"
 WF="${WEIGHTFORGE:-$HERE/../../../weightforge}"
 if [ ! -d "$FB/corpus" ] && [ -x "$WF/bench/corpus/fetch.sh" ]; then "$WF/bench/corpus/fetch.sh"; fi
