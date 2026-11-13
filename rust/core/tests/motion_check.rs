@@ -369,6 +369,30 @@ fn back_and_forth_counts_jitter_not_speed() {
     assert!(arm.peak_mm < 1e-6, "{arm:?}");
     let jerk = c.jerk.iter().find(|j| j.chain == "arm.R").unwrap();
     assert!(jerk.mean > 50.0, "{jerk:?}");
+    // A snap: held, a 0.6 rad strike within two frames, held again. Its
+    // acceleration flips once (start, stop): not jitter. (On the hand's arc
+    // the two halves are not exactly opposite: what is left is under 3% of
+    // the strike's travel; the old count gave about half of it.)
+    let mut snap = still(rig, n);
+    for (f, fr) in snap.iter_mut().enumerate() {
+        let a = if f < 10 {
+            0.0
+        } else if f == 10 {
+            0.3
+        } else {
+            0.6
+        };
+        fr[fore] = Some(turned(rig, fore, Quat::from_axis_angle(axis, a)));
+    }
+    let c = score(&s, "idle", &times(n), &snap, false);
+    let arm = c.rough.iter().find(|r| r.chain == "arm.R").unwrap();
+    let travel_mm = 2.0 * len * 0.3f64.sin() / s.k * 1000.0;
+    assert!(
+        arm.peak_mm < 0.03 * travel_mm,
+        "{arm:?} vs travel {travel_mm}"
+    );
+    let jerk = c.jerk.iter().find(|j| j.chain == "arm.R").unwrap();
+    assert!(jerk.peak > 1000.0, "{jerk:?}");
 }
 
 #[test]

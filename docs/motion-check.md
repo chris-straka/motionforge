@@ -53,7 +53,11 @@ and a giant and numbers compare across characters.
   `max(0, -a_f . a_f+1) / max(|a_f|, |a_f+1|)` with `a` the second
   difference of positions. A fast even arc and a sharp single corner
   score exactly 0 (their accelerations agree, or come alone); a joint
-  jittering +-e every frame scores 4e. Millimetres at 30 fps on a 1.75 m
+  jittering +-e every frame scores 4e. Since 2026-11-13 (round 4) a flip
+  counts only inside a run of flips (the frame before or after flips too):
+  a snap (a strike that starts and stops within two frames, a wind-back
+  turned straight into the strike) flips once and is not jitter; the
+  stylizer's zigzag (out, up, out) still counts in full. Millimetres at 30 fps on a 1.75 m
   body; per chain mean and peak, the table shows the worst chain. Jerk
   stays in the JSON, but it ranks fast moves as rough.
 - **Joint limits** (2026-11-13). Knees and elbows as hinges: the hinge

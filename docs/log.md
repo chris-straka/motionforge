@@ -336,3 +336,21 @@ and draw the fit back over the pictures). How and every number:
 - Open: `rough` scores the anticipation's single reversal as roughness
   (240 mm at the strike; the reel shows one clean wind back and cut);
   no horizontal-slash sheet yet.
+
+## 2026-11-13, round 4: back-and-forth vs snaps (the benchmark fixed first)
+
+The key-pose attacks read cleanly on video but scored 146-268 mm of
+back-and-forth peaks: a strike that starts and stops within two frames
+flips its acceleration once, and that counted as jitter. A flip now counts
+only inside a run of flips (the frame before or after flips too). Test: a
+0.6 rad two-frame snap keeps under 3% of its travel (it was about half);
+the +-0.02 rad jitter and the even swing keep their known answers.
+
+| back-and-forth mm, worst chain mean (11 attack clips) | before | after |
+|---|---|---|
+| originals, sum | 9.3 | 1.9 (attack_3 2.78 -> 0.13: all snaps) |
+| round-2 stylized, sum | 200.0 | 149.8 |
+| round-3 stylized, sum | 133.5 | 109.1 |
+
+The round-2 stylized attack_1's zigzag (743 mm peak at frame 8, seen in
+the frames) still counts in full.

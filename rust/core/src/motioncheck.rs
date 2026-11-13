@@ -351,9 +351,11 @@ pub struct ClipThrough {
 
 /// Back-and-forth: per joint and frame, how far the next frame's
 /// acceleration (second difference) points back against this frame's,
-/// `max(0, -a_f . a_f+1) / max(|a_f|, |a_f+1|)`. A fast arc or a sharp
-/// corner scores 0 (its accelerations agree or come alone); a joint that
-/// jitters +-e every frame scores 4e. Millimetres at 30 fps on a 1.75 m
+/// `max(0, -a_f . a_f+1) / max(|a_f|, |a_f+1|)`, counted only inside a run
+/// of such flips (the frame before or after flips too). A fast arc or a
+/// sharp corner scores 0 (its accelerations agree or come alone), so does
+/// a snap that flips once (a two-frame strike); a joint that jitters +-e
+/// every frame scores 4e. Millimetres at 30 fps on a 1.75 m
 /// body, relative to the hips.
 #[derive(Clone, Debug)]
 pub struct RoughScore {
@@ -653,15 +655,28 @@ pub fn score(
                     .map(|f| nodes.iter().map(|&j| pos(f, j) - pos(f, hips)).collect())
                     .collect();
                 let acc = |f: usize, j: usize| p[f + 1][j] - p[f][j].scale(2.0) + p[f - 1][j];
+                // How far frame g+1's acceleration points back against
+                // frame g's.
+                let flip = |g: usize, j: usize| -> f64 {
+                    let (a, b) = (acc(g, j), acc(g + 1, j));
+                    let big = a.length().max(b.length());
+                    if big > 0.0 {
+                        (-a.dot(b)).max(0.0) / big
+                    } else {
+                        0.0
+                    }
+                };
                 for f in 1..n - 2 {
                     for j in 0..nodes.len() {
-                        let (a, b) = (acc(f, j), acc(f + 1, j));
-                        let big = a.length().max(b.length());
-                        let rev = if big > 0.0 {
-                            (-a.dot(b)).max(0.0) / big
-                        } else {
-                            0.0
-                        };
+                        // A flip counts only inside a run of flips (the
+                        // frame before or after flips too): a snap (a strike
+                        // that starts and stops within two frames, a wind-back
+                        // turned straight into the strike) flips once; jitter
+                        // and a zigzag keep flipping.
+                        let here = flip(f, j);
+                        let before = f >= 2 && flip(f - 1, j) > 0.0;
+                        let after = f + 2 < n - 1 && flip(f + 1, j) > 0.0;
+                        let rev = if before || after { here } else { 0.0 };
                         let mm = rev / k * 1000.0;
                         sum += mm;
                         count += 1;
