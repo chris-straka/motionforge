@@ -7,6 +7,7 @@
 //! planted feet), scoring against the truth, and the GLB animation.
 //! Spec: docs/creature.md.
 
+pub mod align;
 pub mod camera;
 pub mod compare;
 pub mod detect;

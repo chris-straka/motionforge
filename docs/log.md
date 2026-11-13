@@ -260,8 +260,49 @@ Command: `motionforge motion check <grafted>.glb --camera game --json`
 (and the same on the CC0 Quaternius UAL clips put on the same body).
 The ranking the owner asked for holds: a clearly readable attack (the
 CC0 reference 0.58, attack_3 0.49) above attack_1 (0.42) above idle
-(0.04). What it says about the game: Andras's three attacks move the
-body less than any other attack in the set (0.29-0.40 against 0.54-0.88
-for Quirin's, the husk's and the CC0 ones); none of the attacks, the CC0
-ones included, holds its load a beat. Not yet checked against the
+(0.04). What it says about the game: Andras's three attacks barely move
+the body (0.29-0.40), where Quirin's, the husk's first two and the CC0
+ones reach 0.54-0.88 (the husk's third is 0.37); none of the attacks,
+the CC0 ones included, holds its load a beat. Not yet checked against the
 owner's own picks.
+
+## 2026-11-13, creature video: views aligned
+
+The first real creature clip (Seedance 2.0 Fast, a generated wolf walking
+on the spot, 121 frames at 24 fps) was rejected by `creature-solve` on
+2026-11-11: ray gap 4.7% of the height, motion ratio 1.14 against 0.50.
+Built for it, in `creature::align` (`docs/creature.md`, "Lining up the
+views"), each judged on known answers first
+(`rust/core/tests/creature_align.rs`) and then on the clip:
+
+| piece | known answer | the wolf clip | verdict |
+|---|---|---|---|
+| camera fit on frame 0 (`--align-views`) | zoom 1.25 / 0.9 and shifts recovered within 0.3% and 0.13 px; gap 14.7% -> 0.36% | zoom 1.195 front, 1.249 side (its halves were read at 640 px for 512 px views); gap 4.69% -> 2.67%; forced-solve residual 112 -> 13 mm, limited bone-frames 369 -> 120 | **kept**; use it on every generated clip |
+| constant lag (`--align-time lag`) | 5 frames late: found 5.06, ratio 0.602 -> 0.019 | best lag -0.38 frames, ratio 1.164 -> 1.143 | **kept** (wins where a view is late; this clip isn't) |
+| warp (`--align-time warp`, chosen by `auto` only when 10% better than the lag) | 8% slow view: warp 0.033 vs lag 0.080, chosen | 1.049 (lag -3.0..3.4), not 10% better | **kept** (wins on a drifting view) |
+| frame timing (`times`, detect.py via ffprobe) | every fifth frame dropped: resampled to 50, within 6 px | timestamps uniform, nothing to do | **kept** |
+
+The forced solve with the fit, rendered on the wolf beside the video,
+stands on the floor (lowest foot joint 11-30 mm, rest 22-26) and steps
+with the video (three lifts per front foot); without the fit the feet
+are 3-16 cm under the floor. The hind feet wobble sideways 20-23 mm
+(front 4 mm).
+
+Still rejected (motion ratio 1.14), and rightly: the ratio over constant
+lags has its minimum at 0 (-4: 2.07, 0: 1.14, +4: 1.69), every leg at its
+own best lag only reaches 0.80, following the front view's zoom drift
+(1.187 -> 1.217) leaves 1.15, and weighting by the finder's confidence
+1.00. The disagreement follows occlusion: the front-right leg, seen in
+both views, 0.33; front-left (hidden in the side view) 0.64; hind-right
+(hidden in the front view) 1.20; hind-left (hidden in both) 1.61. The
+finder knows it in the front view (confidence 0.44 on hind legs) but not
+in the side view (0.90 on its far legs). `tools/creature_views.py`
+prints this for any clip.
+
+Also: `detect.py` wrote positions in the video half's pixels instead of
+the view's; fixed (positions in the profile's view pixels).
+
+Next for creature video: joints seen in one view only solved from that
+view's ray and their bone length; a finder confidence that knows the
+far legs are hidden; or a start frame from two three-quarter views that
+each see all four feet.

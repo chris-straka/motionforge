@@ -26,6 +26,9 @@ pub struct Detections {
     pub joints: Vec<String>,
     /// frames[f][view][joint]
     pub frames: Vec<Vec<Vec<Det>>>,
+    /// Optional presentation time of each frame in seconds (the video's
+    /// own timestamps). Absent: frame `f` is at `f / fps`.
+    pub times: Option<Vec<f64>>,
 }
 
 impl Detections {
@@ -49,7 +52,18 @@ impl Detections {
             }
             json::push_str(&mut out, j);
         }
-        out.push_str("],\"frames\":[\n");
+        out.push(']');
+        if let Some(times) = &self.times {
+            out.push_str(",\"times\":[");
+            for (i, t) in times.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                json::push_num(&mut out, *t)?;
+            }
+            out.push(']');
+        }
+        out.push_str(",\"frames\":[\n");
         for (f, frame) in self.frames.iter().enumerate() {
             if f > 0 {
                 out.push_str(",\n");
@@ -166,11 +180,35 @@ impl Detections {
         if frames.is_empty() {
             return Err(format!("{}: no frames", ctx));
         }
+        let times = match v.get("times") {
+            None => None,
+            Some(t) => {
+                let arr = t
+                    .as_arr()
+                    .filter(|a| a.len() == frames.len())
+                    .ok_or_else(|| format!("{}: times needs one entry per frame", ctx))?;
+                let mut out = Vec::with_capacity(arr.len());
+                for (i, x) in arr.iter().enumerate() {
+                    let x = x
+                        .as_f64()
+                        .filter(|x| x.is_finite())
+                        .ok_or_else(|| format!("{}: times[{}] is not a number", ctx, i))?;
+                    if let Some(&prev) = out.last() {
+                        if x <= prev {
+                            return Err(format!("{}: times must increase (at {})", ctx, i));
+                        }
+                    }
+                    out.push(x);
+                }
+                Some(out)
+            }
+        };
         Ok(Detections {
             fps,
             views,
             joints,
             frames,
+            times,
         })
     }
 }
@@ -218,6 +256,7 @@ pub fn project_clip(c: &Creature, clip: &Clip, noise_px: f64, drop: f64, seed: u
         views: views.iter().map(|v| v.name.clone()).collect(),
         joints: c.joint_names(),
         frames,
+        times: None,
     }
 }
 
@@ -257,6 +296,7 @@ mod tests {
                     },
                 ],
             ]],
+            times: None,
         };
         let text = d.emit().unwrap();
         let back = Detections::parse(&text).unwrap();
@@ -265,5 +305,12 @@ mod tests {
         assert!(
             Detections::parse(&text.replace("\"frames\":[\n[[", "\"frames\":[\n[[[1]")).is_err()
         );
+        let mut timed = d.clone();
+        timed.times = Some(vec![0.125]);
+        let text = timed.emit().unwrap();
+        let back = Detections::parse(&text).unwrap();
+        assert_eq!(back.times, Some(vec![0.125]));
+        assert_eq!(back.emit().unwrap(), text);
+        assert!(Detections::parse(&text.replace("[0.125]", "[0.1,0.2]")).is_err());
     }
 }
