@@ -94,6 +94,23 @@ def rank(t):
             -t.get("score", 0.0), t.get("seed", 0), t.get("cut", False))
 
 
+def fresh(path):
+    """Remove `path` so a step that fails cannot leave an older run's file
+    standing in for its output."""
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def apply_step_failures(t):
+    """A try whose clips failed to retarget fails, whatever the weight gate
+    said: the gate then judged the bare rig, not the clips (the run used to
+    carry on and could report a pass)."""
+    step = t.get("animate") or {}
+    if step.get("error") is not None or step.get("code", 0) != 0:
+        t["pass"] = False
+        t["fails"] = ["animate failed: " + (step.get("error") or f"exit {step.get('code')}")] + list(t.get("fails", []))
+
+
 def pick_best(tries):
     good = [t for t in tries if t.get("rigged")]
     return sorted(good, key=rank)[0] if good else None
@@ -233,6 +250,7 @@ def main():
             # A human: clips retargeted from a library before the check, so
             # the gate sees them too.
             moving = base + ".moving.glb"
+            fresh(moving)
             cmd = [mf, "animate", "--input", std, "--output", moving]
             for c in a.clips:
                 cmd += ["--clips", c]
@@ -250,16 +268,19 @@ def main():
         if a.no_fix or raw["pass"]:
             shutil.copyfile(std, fixed)
         else:
+            # A file left by an earlier run must not pass for this fix.
+            fresh(fixed)
             cmd = [wf, "fix", std, "--out", fixed, "--sheet", base + ".sheet.png"] + poses + shlex.split(a.fix_args)
             r = run(cmd, timeout=a.fix_timeout)
             t["fix"] = {"code": r["code"], "secs": r["secs"]}
-            if not os.path.exists(fixed):
+            if r["code"] != 0 or not os.path.exists(fixed):
                 t["fix"]["error"] = tail(r["err"] or r["out"])
                 shutil.copyfile(std, fixed)
         final = check(wf, fixed, poses)
         if poses:
             shutil.copyfile(poses[1], os.path.join(a.out, name + ".rom.ron"))
         t.update(score=final["score"], **{"pass": final["pass"]}, fails=final["fails"])
+        apply_step_failures(t)
         r = run([rf, "--json", "--class", klass, fixed])
         t["contract"] = r["code"] == 0
         t["rfcheck"] = contract_notes(r["out"])
