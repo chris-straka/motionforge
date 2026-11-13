@@ -4,6 +4,7 @@
 
 use crate::{parse_f64, parse_usize, read_file, write_file, Cmd};
 use motion_core::clip::{emit_clip, parse_clip};
+use motion_core::creature::align::{prepare, TimeMode};
 use motion_core::creature::compare::compare;
 use motion_core::creature::detect::{project_clip, Detections};
 use motion_core::creature::gait;
@@ -248,6 +249,8 @@ pub fn cmd_project(cmd: &Cmd) -> Result<String, (i32, String)> {
 /// [--glb-in rig.glb --glb-out anim.glb [--clip-name NAME]] [--no-pin] [--force]
 /// [--smooth-sigma 1] [--quat-sigma 0.8] [--max-gap-ratio 0.08] [--max-motion-ratio 0.5]
 /// [--min-conf 0.2] [--report r.json]
+/// [--align-views [--align-frame 0]] [--align-time off|lag|warp|auto [--max-lag 12]]
+/// [--aligned-out det.json]
 pub fn cmd_solve(cmd: &Cmd) -> Result<String, (i32, String)> {
     let c = load_creature(cmd)?;
     let dets = Detections::parse(&read_file(cmd.required("detections")?)?)
@@ -261,6 +264,14 @@ pub fn cmd_solve(cmd: &Cmd) -> Result<String, (i32, String)> {
         max_motion_ratio: parse_f64(cmd, "max-motion-ratio", 0.5)?,
         min_conf: parse_f64(cmd, "min-conf", 0.2)?,
         force: cmd.flag("force"),
+        align_views: cmd.flag("align-views"),
+        align_frame: parse_usize(cmd, "align-frame", 0)?,
+        time_mode: match cmd.get("align-time") {
+            None => TimeMode::Off,
+            Some(s) => TimeMode::parse(s)
+                .ok_or_else(|| (1, "--align-time takes off, lag, warp or auto".to_string()))?,
+        },
+        max_lag: parse_usize(cmd, "max-lag", 12)?,
     };
     if params.max_gap_ratio <= 0.0 || params.max_motion_ratio <= 0.0 {
         return Err((
@@ -272,6 +283,10 @@ pub fn cmd_solve(cmd: &Cmd) -> Result<String, (i32, String)> {
     if glb_in.is_some() != glb_out.is_some() {
         return Err((1, "--glb-in and --glb-out go together".into()));
     }
+    if let Some(p) = cmd.get("aligned-out") {
+        let (aligned, _) = prepare(&c, &dets, &params).map_err(|e| (3, e))?;
+        write_file(p, &aligned.emit().map_err(|e| (3, e))?)?;
+    }
     let (clip, report) = solve(&c, &dets, &params).map_err(|e| (3, e))?;
     write_file(&output, &emit_clip(&clip).map_err(|e| (3, e))?)?;
     let mut r = String::new();
@@ -280,6 +295,48 @@ pub fn cmd_solve(cmd: &Cmd) -> Result<String, (i32, String)> {
         "frames: {} at {} fps; joints seen: {} of {}\n",
         report.frames, dets.fps, report.joints_seen, report.joints_total
     ));
+    if let Some(a) = &report.align {
+        r.push_str(&format!(
+            "before lining up: median ray gap {:.2}% of height, motion ratio {:.3}\n",
+            a.gap_before * 100.0,
+            a.ratio_before
+        ));
+        if let Some(t) = &a.timing {
+            r.push_str(&format!(
+                "timing: {} -> {} frames (timestamps off the grid by up to {:.2} frames{})\n",
+                t.frames_in,
+                t.frames_out,
+                t.max_jitter_frames,
+                if t.resampled { ", resampled" } else { "" }
+            ));
+        }
+        for f in &a.fits {
+            r.push_str(&format!(
+                "camera {}: zoom {:.4}, shift ({:.1}, {:.1}) px; frame fit {:.1} -> {:.1} px rms over {} joints\n",
+                f.view, f.scale, f.du, f.dv, f.rms_before_px, f.rms_after_px, f.joints
+            ));
+        }
+        if let Some(t) = &a.time {
+            r.push_str(&format!(
+                "time: {} ({}); {} lag {:.2} frames; motion ratio none {:.3}, lag {:.3}{}; {} frames kept from frame {}\n",
+                t.used,
+                t.reason,
+                t.view,
+                t.lag_frames,
+                t.ratio_none,
+                t.ratio_lag,
+                match t.ratio_warp {
+                    Some(w) => format!(
+                        ", warp {:.3} (lag {:.1}..{:.1})",
+                        w, t.warp_lag_min, t.warp_lag_max
+                    ),
+                    None => String::new(),
+                },
+                t.frames_kept,
+                t.first_frame
+            ));
+        }
+    }
     r.push_str(&format!(
         "views agree: {} (median ray gap {:.2}% of height, motion ratio {:.3})\n",
         if report.consistent {

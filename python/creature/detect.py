@@ -9,11 +9,19 @@ A video is one composite per frame: the front view on the left, the side
 view on the right (the layout the start frame was rendered in); each half
 is resized to the model's input. `--frames DIR` takes render.py --mode
 motion output (f{i}_{view}.png) directly, which is what the exam does.
+
+Positions are written in each view's own pixels as the creature profile
+sizes it (`views[].width/height`), whatever size the video's halves come
+in at (the first real clip's halves were 640 px for 512 px views). A
+video's own frame timestamps (ffprobe) go into `times`, so
+`creature-solve` can resample a clip whose frames are not evenly spaced.
 """
 
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 
 import torch
@@ -43,6 +51,25 @@ def read_video(path):
     return frames, fps
 
 
+def video_times(path, count):
+    """Presentation time (s) of each video frame, or None when ffprobe is
+    missing or disagrees with the decoder about the frame count."""
+    exe = shutil.which("ffprobe")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "frame=best_effort_timestamp_time", "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True).stdout
+        times = [float(x.strip().rstrip(",")) for x in out.split() if x.strip().rstrip(",")]
+    except (subprocess.CalledProcessError, ValueError):
+        return None
+    if len(times) != count or any(b <= a for a, b in zip(times, times[1:])):
+        return None
+    return times
+
+
 def split_views(frame, n_views):
     """Composite (3, H, W) -> list of (3, H, W/n) halves left to right."""
     c, h, w = frame.shape
@@ -66,6 +93,7 @@ def main():
     with open(args.creature) as f:
         creature = json.load(f)
     views = [v["name"] for v in creature["views"]]
+    view_size = [(v["width"], v["height"]) for v in creature["views"]]
     ckpt = torch.load(args.model, map_location="cpu", weights_only=False)
     if ckpt["views"] != views:
         raise SystemExit(f"model views {ckpt['views']} differ from the creature's {views}")
@@ -76,9 +104,11 @@ def main():
     # Per frame: one image per view (original view size kept for the output scale).
     per_frame = []  # list of [(img, (w, h)) per view]
     fps = args.fps
+    times = None
     if args.video:
         frames, vfps = read_video(args.video)
         fps = fps or vfps
+        times = video_times(args.video, len(frames))
         for fr in frames:
             halves = split_views(fr, len(views))
             per_frame.append([(h_, (h_.shape[2], h_.shape[1])) for h_ in halves])
@@ -106,11 +136,14 @@ def main():
             chunk = flat[k:k + args.batch]
             x = torch.stack([finder.to_input(c[2]) for c in chunk]).to(args.device)
             u, v, conf = finder.decode(model(x).float())
-            for n, (fi, vi, _, (w, h)) in enumerate(chunk):
-                su, sv = w / finder.INPUT, h / finder.INPUT
+            for n, (fi, vi, _, _size) in enumerate(chunk):
+                # Into the view's own pixels (the half may come at another size).
+                su, sv = view_size[vi][0] / finder.INPUT, view_size[vi][1] / finder.INPUT
                 results[(fi, vi)] = [[float(u[n, j]) * su, float(v[n, j]) * sv, float(conf[n, j])] for j in range(u.shape[1])]
     out = {"format": "motionforge-detections", "version": 1, "fps": fps, "views": views, "joints": ckpt["joints"],
            "frames": [[results[(fi, vi)] for vi in range(len(views))] for fi in range(len(per_frame))]}
+    if times is not None:
+        out["times"] = times
     with open(args.out, "w") as f:
         json.dump(out, f)
     confs = [d[2] for fr in out["frames"] for v in fr for d in v]
