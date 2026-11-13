@@ -201,3 +201,27 @@ spikes (quirin-attack_2 652 mm at frame 14, attack_1 284 at 6: the
 hold-to-strike corner of the time warp), then `--stylize auto`: stylize a
 clip only where its defects stay within the original's and its windup or
 hold grows, and report per clip which won.
+
+## 2026-11-13, keypose: sword attacks from drawn key poses
+
+Owner's idea (a): key-pose pictures of a swing, read onto the rig, keyed
+between with an animator's timing. Built `motionforge keypose` (Rust:
+two-view fusion, bone-by-bone fit, timing; Python only to run MediaPipe
+and draw the fit back over the pictures). How and every number:
+`docs/keypose.md`.
+
+- Known answer: a hand-posed fixture drawn front and side fits back
+  within 0.00 deg per limb (0.85 deg with MediaPipe's depth 5 cm off;
+  one view alone with that depth error: 13 deg).
+- Made the two diagonal two-handed cuts from HLH's drawn sheets
+  (`kp_cut_right`, `kp_cut_left`, 36 frames): no skate, no sink, limits
+  4 and 1 frames (worst 5 deg), windup 0.20 s, strike 0.10 s, tip 41-49
+  m/s, held 9 frames. The game's attack_1 and attack_3 skate 86-88% and
+  sink 5-11 cm; the Kimodo clips made from the same drawings sink 89 cm.
+- Tried and kept as options: fitting a turn between the views (worse
+  than none on these sheets), feet as drawn (5 steps up to 2.2 m: the
+  drawings swap which foot is in front) and per-key stances (4 steps).
+  Default: every key on the strike's feet.
+- Open: `rough` scores the anticipation's single reversal as roughness
+  (240 mm at the strike; the reel shows one clean wind back and cut);
+  no horizontal-slash sheet yet.
