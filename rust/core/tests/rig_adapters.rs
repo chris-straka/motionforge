@@ -529,3 +529,83 @@ fn clips_and_poses_bake_half_the_driver_into_helpers() {
         .to_degrees();
     assert!((deg - 35.0).abs() < 0.01, "helper turned {deg}");
 }
+
+#[test]
+fn standardize_keeps_each_skins_own_bind() {
+    // A second mesh bound in another space (its vertices offset by d, its
+    // inverse bind matrices undoing that): standardize used to give every
+    // skin the first skin's matrices, moving this mesh by d.
+    use motion_core::math::Quat;
+    let mut doc = humanoid(Naming::Mixamo, false, true).unwrap();
+    let first = skinned_positions(&doc).len();
+    let d = Vec3::new(0.3, -0.2, 0.5);
+    let shift = Affine::from_trs(d.scale(-1.0), Quat::IDENTITY, Vec3::new(1.0, 1.0, 1.0));
+    let mesh0 = doc.array("meshes")[0].clone();
+    let attrs = mesh0.get("primitives").unwrap().as_arr().unwrap()[0]
+        .get("attributes")
+        .unwrap()
+        .clone();
+    let pos = doc
+        .read_accessor(attrs.get("POSITION").unwrap().as_usize().unwrap())
+        .unwrap();
+    let moved: Vec<Vec<f64>> = pos
+        .iter()
+        .map(|p| vec![p[0] + d.x, p[1] + d.y, p[2] + d.z])
+        .collect();
+    let pos_acc = doc.push_float_accessor(&moved, "VEC3", true);
+    let skin0 = doc.array("skins")[0].clone();
+    let ibm0 = doc
+        .read_accessor(
+            skin0
+                .get("inverseBindMatrices")
+                .unwrap()
+                .as_usize()
+                .unwrap(),
+        )
+        .unwrap();
+    let ibm1: Vec<Vec<f64>> = ibm0
+        .iter()
+        .map(|m| Affine::from_gltf_matrix(m).mul(&shift).to_gltf_matrix())
+        .collect();
+    let ibm_acc = doc.push_float_accessor(&ibm1, "MAT4", false);
+    let mut mesh1 = mesh0.clone();
+    mesh1.get_mut("primitives").unwrap().as_arr_mut().unwrap()[0]
+        .get_mut("attributes")
+        .unwrap()
+        .set("POSITION", Json::num(pos_acc as f64));
+    doc.array_mut("meshes").push(mesh1);
+    let mut skin1 = skin0.clone();
+    skin1.set("inverseBindMatrices", Json::num(ibm_acc as f64));
+    doc.array_mut("skins").push(skin1);
+    let node = doc.array("nodes").len();
+    doc.array_mut("nodes").push(Json::obj(vec![
+        ("name", Json::str("Second")),
+        ("mesh", Json::num(1.0)),
+        ("skin", Json::num(1.0)),
+    ]));
+    let scene = &mut doc.array_mut("scenes")[0];
+    let mut roots = scene.get("nodes").unwrap().as_arr().unwrap().to_vec();
+    roots.push(Json::num(node as f64));
+    scene.set("nodes", Json::Arr(roots));
+
+    let before = skinned_positions(&doc);
+    let added = &before[first..];
+    assert!(!added.is_empty());
+    let mesh0_n = added.len();
+    for (a, b) in before[..mesh0_n].iter().zip(added) {
+        assert!(a.approx_eq(*b, 1e-5), "fixture: both meshes coincide");
+    }
+    let (out, _) = done(standardize(&doc, "humanoid").unwrap());
+    let out = Document::parse(&out.to_bytes().unwrap()).unwrap();
+    let after = skinned_positions(&out);
+    assert_eq!(before.len(), after.len());
+    for (i, (a, b)) in before.iter().zip(&after).enumerate() {
+        assert!(a.approx_eq(*b, 1e-5), "vertex {i} moved: {a:?} -> {b:?}");
+    }
+    // Two different tables, not one shared.
+    let s = out.array("skins");
+    assert_ne!(
+        s[0].get("inverseBindMatrices").unwrap().as_usize(),
+        s[1].get("inverseBindMatrices").unwrap().as_usize()
+    );
+}

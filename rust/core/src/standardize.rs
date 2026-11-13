@@ -289,15 +289,27 @@ fn humanoid_standardize(doc: &Document, rig: &Rig) -> Result<Outcome, String> {
             .filter(|(_, c)| crate::helpers::is_helper(c))
             .map(|(n, _)| *n),
     );
-    let mut skin_ibm_rows: Vec<Vec<f64>> = Vec::new();
-    for &j in &new_joints {
-        skin_ibm_rows.push(original_ibm(doc, rig, j)?.to_gltf_matrix());
-    }
-    let ibm = out.push_float_accessor(&skin_ibm_rows, "MAT4", false);
+    // Each skin keeps its own bind: two meshes bound at different times
+    // (or with different mesh transforms) have different inverse bind
+    // matrices for the same joint, and one shared table (the first skin's)
+    // moved the other mesh off its bones.
     let hips = map.node_of("DEF-spine").expect("required");
     let joint_json = Json::Arr(new_joints.iter().map(|&j| Json::num(j as f64)).collect());
     let skin_count = rig.skins.len();
+    let mut tables: Vec<(Vec<Vec<f64>>, usize)> = Vec::new();
     for si in 0..skin_count {
+        let rows: Vec<Vec<f64>> = new_joints
+            .iter()
+            .map(|&j| skin_ibm(doc, rig, si, j).map(|m| m.to_gltf_matrix()))
+            .collect::<Result<_, _>>()?;
+        let ibm = match tables.iter().find(|(r, _)| *r == rows) {
+            Some((_, acc)) => *acc,
+            None => {
+                let acc = out.push_float_accessor(&rows, "MAT4", false);
+                tables.push((rows, acc));
+                acc
+            }
+        };
         let skins = out.array_mut("skins");
         let skin = &mut skins[si];
         skin.set("joints", joint_json.clone());
@@ -435,6 +447,37 @@ fn humanoid_standardize(doc: &Document, rig: &Rig) -> Result<Outcome, String> {
     // The dropped animations' data leaves the file.
     out.compact();
     Ok(Outcome::Done(out, report))
+}
+
+/// Inverse bind matrix of `joint` for skin `si`: the skin's own when it
+/// had the joint; otherwise the skin's bind carried to that joint
+/// (`IBM_j = rest_j^-1 * rest_k * IBM_k` for a joint `k` the skin had, the
+/// same mesh-to-bind transform every joint of a consistent skin shares);
+/// with neither, the joint's IBM from any skin ([`original_ibm`]).
+fn skin_ibm(doc: &Document, rig: &Rig, si: usize, joint: usize) -> Result<Affine, String> {
+    let skin = &doc.array("skins")[si];
+    let joints = &rig.skins[si];
+    let Some(acc) = skin.get("inverseBindMatrices").and_then(Json::as_usize) else {
+        if joints.contains(&joint) {
+            return Ok(Affine::IDENTITY);
+        }
+        return original_ibm(doc, rig, joint);
+    };
+    let rows = doc.read_accessor(acc)?;
+    if rows.len() < joints.len() {
+        return Err("inverseBindMatrices shorter than joints".into());
+    }
+    if let Some(slot) = joints.iter().position(|&j| j == joint) {
+        return Ok(Affine::from_gltf_matrix(&rows[slot]));
+    }
+    let Some(&k) = joints.first() else {
+        return original_ibm(doc, rig, joint);
+    };
+    let bind = rig.rest_world[k].mul(&Affine::from_gltf_matrix(&rows[0]));
+    Ok(rig.rest_world[joint]
+        .inverse()
+        .ok_or_else(|| format!("joint {} has a singular transform", rig.names[joint]))?
+        .mul(&bind))
 }
 
 /// The joint's inverse bind matrix from its original skin, or the
