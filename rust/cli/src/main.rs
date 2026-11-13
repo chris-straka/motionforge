@@ -37,6 +37,7 @@ commands:\n\
   standardize    rig GLB -> standard humanoid skeleton (DEF-* names, canonical parents)\n\
   animate        retarget clip GLBs onto a rigged GLB (+ contact pass)\n\
   motion check   score each clip of a rigged GLB: foot skate, ground, limbs in the body, jerk, attack timing\n\
+  clean          fix a rigged GLB's own clips: floor offset, feet under the floor, sliding plants, arms in the body\n\
   grip           find a weapon clip set's grip, write it into the hand socket\n\
   pose-test      range-of-motion poses as animations (+ rendered sheet)\n\
   fixture-glb    procedural skinned test humanoid GLB\n\
@@ -52,6 +53,11 @@ commands:\n\
 retarget flags:\n\
   --source <clip> --target <skeleton|clip> --map <bonemap> --output <clip>\n\
   --yaw auto|flip|none (default auto)  --pin|--no-pin (default --pin)\n\
+\n\
+clean flags:\n\
+  --input <rigged glb> --output <glb>  --clip <name> (repeatable; default all)\n\
+  --suffix <s> (keep originals, add <name><s>)  --no-ground  --no-lock  --contact (arms out of the body)\n\
+  --weapon R|L|none  --weapon-clips <a,b>  --report <json>\n\
 \n\
 stylize flags:\n\
   --input <clip|rigged glb> --output <clip|glb>\n\
@@ -102,6 +108,7 @@ animate flags:\n\
   --weapon R|L|none (default R)\n\
   --weapon-length <heights> (default 0.75)  --weapon-clips <a,b> (name parts)\n\
   --contact-ramp <s> (default 0.15)  --proxies <json> (write collision proxies)\n\
+  --stylize attacks|<a,b> (body stylizer on those clips)  --clean (then `clean` on every clip)\n\
 \n\
 grip flags:\n\
   --input <glb with weapon clips> [--side R|L] [--weapon-length <heights>]\n\
@@ -183,6 +190,10 @@ fn is_bool_flag(key: &str) -> bool {
             | "no-contact"
             | "json"
             | "no-replant"
+            | "no-ground"
+            | "no-lock"
+            | "contact"
+            | "clean"
             | "walk"
             | "force"
             | "time"
@@ -687,6 +698,7 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "standardize" => glb_cmds::cmd_standardize(&args),
             "animate" => glb_cmds::cmd_animate(&args),
             "motion-check" => glb_cmds::cmd_motion_check(&args),
+            "clean" => glb_cmds::cmd_clean(&args),
             "grip" => glb_cmds::cmd_grip(&args),
             "pose-test" => glb_cmds::cmd_pose_test(&args),
             "fixture-glb" => glb_cmds::cmd_fixture_glb(&args),

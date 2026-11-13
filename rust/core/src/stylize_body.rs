@@ -638,6 +638,40 @@ pub fn stylize_glb(
     Ok((out, reports))
 }
 
+/// Animation JSON for posed frames (local overrides at `times`):
+/// rotation for every node in `nodes`, translation for those whose
+/// translation leaves its rest value on some frame (a held offset too:
+/// dropping one put the hips back at rest height).
+pub fn encode_clip(
+    out: &mut Document,
+    rig: &Rig,
+    name: &str,
+    times: &[f64],
+    nodes: &[usize],
+    frames: &[Vec<Option<Trs>>],
+) -> crate::json::Json {
+    let tracks: Vec<Vec<Trs>> = nodes
+        .iter()
+        .map(|&nd| {
+            frames
+                .iter()
+                .map(|f| f[nd].unwrap_or(rig.rest[nd]))
+                .collect()
+        })
+        .collect();
+    let moving: Vec<usize> = nodes
+        .iter()
+        .enumerate()
+        .filter(|(k, &nd)| {
+            tracks[*k]
+                .iter()
+                .any(|t| (t.t - rig.rest[nd].t).length() > 1e-9)
+        })
+        .map(|(_, &nd)| nd)
+        .collect();
+    encode_animation(out, name, times, nodes, &tracks, &moving)
+}
+
 /// Animation JSON (accessors pushed into `out`): rotation for every node,
 /// translation for the `moving` ones.
 fn encode_animation(

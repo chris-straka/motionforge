@@ -198,6 +198,64 @@ pub fn cmd_animate(cmd: &Cmd) -> CmdResult {
     let pin = !cmd.flag("no-pin");
     let (out, reports) = retarget_with(&doc, &sources, fps, pick.as_ref(), contact.as_ref(), pin)
         .map_err(|e| (3, e))?;
+    // Optional passes on the retargeted clips, in order: the body
+    // stylizer (on the clips `--stylize` names, `attacks` = the attack
+    // clips), then `clean` (floor, lifts, plant lock).
+    let mut extra = String::new();
+    let out = match cmd.get("stylize") {
+        Some(which) => {
+            use motion_core::stylize_body::{stylize_glb, BodyParams, Mode};
+            let names: Vec<String> = if which == "attacks" {
+                motion_core::rig::Animation::load_all(&out)
+                    .map_err(|e| (3, e))?
+                    .iter()
+                    .filter(|a| {
+                        motion_core::motioncheck::is_attack(
+                            &a.name,
+                            &motion_core::motioncheck::ATTACK_WORDS
+                                .iter()
+                                .map(|w| w.to_string())
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .map(|a| a.name.clone())
+                    .collect()
+            } else {
+                which
+                    .split(',')
+                    .map(|c| c.trim().to_string())
+                    .filter(|c| !c.is_empty())
+                    .collect()
+            };
+            if names.is_empty() {
+                out
+            } else {
+                let (o, reps) = stylize_glb(&out, &BodyParams::default(), Mode::Body, &names, None, true)
+                    .map_err(|e| (3, e))?;
+                for c in &reps {
+                    extra.push_str(&format!("  stylized {}: keys {:?}\n", c.name, c.keys));
+                }
+                o
+            }
+        }
+        None => out,
+    };
+    let out = if cmd.flag("clean") {
+        use motion_core::clean::{clean_glb, CleanOptions};
+        let (o, reps) = clean_glb(&out, &CleanOptions::default(), &[], None).map_err(|e| (3, e))?;
+        for c in &reps {
+            extra.push_str(&format!(
+                "  clean {}: ground {:+.1} cm, hips up to {:.1} cm, {} plants locked\n",
+                c.name,
+                c.ground_shift_m * 100.0,
+                c.hips_lift_max_m * 100.0,
+                c.plants_locked
+            ));
+        }
+        o
+    } else {
+        out
+    };
     if let Some(path) = cmd.get("proxies") {
         let rig = motion_core::rig::Rig::from_doc(&doc).map_err(|e| (3, e))?;
         let body =
@@ -230,6 +288,7 @@ pub fn cmd_animate(cmd: &Cmd) -> CmdResult {
             r.push_str(&contact_line(ct));
         }
     }
+    r.push_str(&extra);
     r.push_str(&format!("output: {}\n", output));
     Ok(r)
 }
@@ -858,6 +917,57 @@ pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
             ));
         }
     }
+    Ok(r)
+}
+
+/// `motionforge clean`: the clean-up pass on a GLB's own clips
+/// (`motion_core::clean`).
+pub fn cmd_clean(cmd: &Cmd) -> CmdResult {
+    use motion_core::clean::{clean_glb, CleanOptions};
+    let input = cmd.required("input")?;
+    let output = cmd.required("output")?;
+    let opts = CleanOptions {
+        ground: !cmd.flag("no-ground"),
+        lock: !cmd.flag("no-lock"),
+        contact: if cmd.flag("contact") {
+            contact_opts(cmd)?
+        } else {
+            None
+        },
+    };
+    let clips: Vec<String> = cmd
+        .all("clip")
+        .iter()
+        .flat_map(|c| c.split(','))
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .collect();
+    let doc = load(input)?;
+    let (out, reports) = clean_glb(&doc, &opts, &clips, cmd.get("suffix")).map_err(|e| (3, e))?;
+    save(&out, output)?;
+    if let Some(path) = cmd.get("report") {
+        let j = Json::Arr(reports.iter().map(|r| r.to_json()).collect());
+        std::fs::write(path, pretty(&j)?).map_err(|e| (3, e.to_string()))?;
+    }
+    let mut r = String::from("=== motionforge clean ===\n");
+    for c in &reports {
+        r.push_str(&format!(
+            "clip {}: {} frames, ground {:+.1} cm, hips up to {:.1} cm, lifted {} foot-frames (up to {:.1} cm), {} plants locked over {} frames (ankle moved up to {:.1} cm)\n",
+            c.name,
+            c.frames,
+            c.ground_shift_m * 100.0,
+            c.hips_lift_max_m * 100.0,
+            c.lift_frames,
+            c.lift_max_m * 100.0,
+            c.plants_locked,
+            c.lock_frames,
+            c.lock_max_m * 100.0
+        ));
+        if let Some(ct) = &c.contact {
+            r.push_str(&contact_line(ct));
+        }
+    }
+    r.push_str(&format!("output: {}\n", output));
     Ok(r)
 }
 

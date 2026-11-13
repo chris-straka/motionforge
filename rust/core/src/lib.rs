@@ -5,6 +5,7 @@
 
 pub mod animate;
 pub mod autopose;
+pub mod clean;
 pub mod clip;
 pub mod contact;
 pub mod creature;
