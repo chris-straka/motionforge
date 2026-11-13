@@ -166,6 +166,44 @@ impl Document {
                 mark(sm.get("output"), &mut used);
             }
         }
+        // Every buffer view a kept accessor or image uses must lie inside
+        // the BIN chunk before anything is rewritten: bailing out halfway
+        // (as this used to, after remapping the meshes' accessor indices
+        // but before dropping the accessors) left references pointing at
+        // the wrong accessors.
+        {
+            let views = self.array("bufferViews");
+            let check = |v: Option<&Json>| -> bool {
+                let Some(i) = v.and_then(Json::as_usize) else {
+                    return true;
+                };
+                let Some(view) = views.get(i) else {
+                    return false;
+                };
+                let off = view.get("byteOffset").and_then(Json::as_usize).unwrap_or(0);
+                let len = view.get("byteLength").and_then(Json::as_usize).unwrap_or(0);
+                off.checked_add(len)
+                    .is_some_and(|end| end <= self.bin.len())
+            };
+            let accs = self.array("accessors");
+            let mut ok = true;
+            for (i, a) in accs.iter().enumerate() {
+                if !used[i] {
+                    continue;
+                }
+                ok &= check(a.get("bufferView"));
+                if let Some(sp) = a.get("sparse") {
+                    ok &= check(sp.get("indices").and_then(|x| x.get("bufferView")));
+                    ok &= check(sp.get("values").and_then(|x| x.get("bufferView")));
+                }
+            }
+            for img in self.array("images") {
+                ok &= check(img.get("bufferView"));
+            }
+            if !ok {
+                return; // malformed: leave the file as it is
+            }
+        }
         let mut acc_map = vec![usize::MAX; n_acc];
         let mut k = 0;
         for i in 0..n_acc {
@@ -265,9 +303,8 @@ impl Document {
             }
             let off = v.get("byteOffset").and_then(Json::as_usize).unwrap_or(0);
             let len = v.get("byteLength").and_then(Json::as_usize).unwrap_or(0);
-            let Some(bytes) = self.bin.get(off..off + len) else {
-                return; // malformed: leave the file as it is
-            };
+            // Checked above for every view still in use.
+            let bytes = &self.bin[off..off + len];
             while bin.len() % 4 != 0 {
                 bin.push(0);
             }
@@ -773,6 +810,66 @@ mod tests {
             a.get("max").unwrap().as_arr().unwrap()[2].as_f64(),
             Some(9.0)
         );
+    }
+
+    /// A mesh using accessor 1 and an animation-free file: accessor 0 is
+    /// dead weight.
+    fn two_accessor_doc() -> Document {
+        let mut doc = Document {
+            json: json::parse(
+                r#"{"asset":{"version":"2.0"},"meshes":[{"primitives":[{"attributes":{}}]}]}"#,
+            )
+            .unwrap(),
+            bin: Vec::new(),
+        };
+        let dead = doc.push_float_accessor(&[vec![7.0, 7.0, 7.0]], "VEC3", false);
+        let live = doc.push_float_accessor(&[vec![1.0, 2.0, 3.0]], "VEC3", true);
+        assert_eq!((dead, live), (0, 1));
+        let prim = &mut doc.array_mut("meshes")[0]
+            .get_mut("primitives")
+            .and_then(Json::as_arr_mut)
+            .unwrap()[0];
+        prim.get_mut("attributes")
+            .unwrap()
+            .set("POSITION", Json::num(1.0));
+        doc
+    }
+
+    fn position_accessor(doc: &Document) -> usize {
+        doc.array("meshes")[0]
+            .get("primitives")
+            .unwrap()
+            .as_arr()
+            .unwrap()[0]
+            .get("attributes")
+            .unwrap()
+            .get("POSITION")
+            .and_then(Json::as_usize)
+            .unwrap()
+    }
+
+    #[test]
+    fn compact_drops_dead_accessors_and_keeps_references_right() {
+        let mut doc = two_accessor_doc();
+        doc.compact();
+        assert_eq!(doc.array("accessors").len(), 1);
+        let a = position_accessor(&doc);
+        assert_eq!(a, 0);
+        assert_eq!(doc.read_accessor(a).unwrap(), vec![vec![1.0, 2.0, 3.0]]);
+        assert_eq!(doc.bin.len(), 12);
+    }
+
+    #[test]
+    fn compact_leaves_a_malformed_file_whole() {
+        // The live accessor's view runs past the BIN chunk. compact used to
+        // remap the mesh's reference to 0 and then give up, leaving it
+        // pointing at the dead accessor.
+        let mut doc = two_accessor_doc();
+        doc.array_mut("bufferViews")[1].set("byteLength", Json::num(4096.0));
+        let before = json::emit(&doc.json).unwrap();
+        doc.compact();
+        assert_eq!(json::emit(&doc.json).unwrap(), before);
+        assert_eq!(position_accessor(&doc), 1);
     }
 
     #[test]
