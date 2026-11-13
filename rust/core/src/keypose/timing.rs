@@ -3,8 +3,10 @@
 //! Each key has a role. A **load** (the windup's top) is reached with an
 //! ease in and out and held for a few frames while it keeps creeping
 //! further along the windup (a moving hold). The **strike** is a pass
-//! key: the move from the load is *fast in* (accelerating, 2-4 frames at
-//! 30 fps: the smear) and runs through it without stopping. The
+//! key: the move from the load is *fast in* (accelerating, then at full
+//! speed through the contact; 2-4 frames at 30 fps: the smear) and runs
+//! through it without stopping; the follow-through leaves at that speed
+//! (its frames scale with the blade's travel in it). The
 //! **follow-through** is reached easing out, overshoots by a share of
 //! its last move and settles back, then holds. A plain **pose** eases in
 //! and out with a short hold. The clip starts from and returns to the
@@ -31,8 +33,8 @@
 //! rotation back against it instead of creeping.
 
 use super::fit::{
-    grip_with, knees_over_toes, move_root, needed_drop, plant_feet_with, set_world_rot, FitParams,
-    RigInfo,
+    cap_wrists, grip_with, knees_over_toes, move_root, needed_drop, plant_feet_with, set_world_rot,
+    FitParams, RigInfo,
 };
 use crate::detmath;
 use crate::math::{Quat, Vec3};
@@ -150,6 +152,8 @@ pub struct TimingReport {
     pub offsets: Vec<Vec3>,
     /// Feet locked but drawn this far apart between keys (m), worst.
     pub lock_slide_max: f64,
+    /// Frames given to the follow-through (speed carried from the strike).
+    pub follow_frames: usize,
 }
 
 pub fn ease_in_out(u: f64) -> f64 {
@@ -163,6 +167,24 @@ pub fn ease_in(u: f64) -> f64 {
 
 pub fn ease_out(u: f64) -> f64 {
     1.0 - (1.0 - u) * (1.0 - u)
+}
+
+/// The strike: accelerating over its first half, then at full speed
+/// through the contact (no braking before the hit).
+pub fn strike_in(x: f64) -> f64 {
+    let a = 0.5;
+    let c = 1.0 / (1.0 - 0.5 * a);
+    if x < a {
+        c * x * x / (2.0 * a)
+    } else {
+        c * (0.5 * a + x - a)
+    }
+}
+
+/// The follow-through: leaving the contact at full speed, braking over
+/// its second half.
+pub fn follow_out(x: f64) -> f64 {
+    1.0 - strike_in(1.0 - x)
 }
 
 fn qlog(q: Quat) -> Vec3 {
@@ -419,6 +441,36 @@ pub fn build(
     let segs: Vec<Segment> = (1..keys.len())
         .map(|i| Segment { a: i - 1, b: i })
         .collect();
+    // The follow-through leaves the contact as fast as the strike reached
+    // it: its frames scale with how far the blade travels in it.
+    let travel = |si: usize| {
+        let mut d = 0.0;
+        let mut last = tip(&pose_at(info, &keys, &exit, &segs, si, 0.0));
+        for i in 1..=8 {
+            let p = tip(&pose_at(info, &keys, &exit, &segs, si, i as f64 / 8.0));
+            d += (p - last).length();
+            last = p;
+        }
+        d
+    };
+    let mut follow_frames = vec![params.follow_frames; segs.len()];
+    for si in 1..segs.len() {
+        let (a, b) = (&segs[si - 1], &segs[si]);
+        if keys[a.a].role == Role::Load
+            && keys[a.b].role == Role::Strike
+            && keys[b.b].role == Role::Follow
+        {
+            let (d1, d2) = (travel(si - 1), travel(si));
+            if d1 > 1e-6 {
+                let t = params.strike_frames as f64 * d2 / d1;
+                follow_frames[si] = (t.round() as usize).clamp(2, params.follow_frames.max(2) * 2);
+            }
+        }
+    }
+    rep.follow_frames = (0..segs.len())
+        .find(|&si| keys[segs[si].a].role == Role::Strike && keys[segs[si].b].role == Role::Follow)
+        .map(|si| follow_frames[si])
+        .unwrap_or(0);
     let mut samples: Vec<Sample> = Vec::new();
     let mut key_frames = vec![0usize];
     let mut holds = vec![0usize; keys.len()];
@@ -426,8 +478,8 @@ pub fn build(
     for (si, sg) in segs.iter().enumerate() {
         let (ra, rb) = (keys[sg.a].role, keys[sg.b].role);
         let (frames, curve): (usize, fn(f64) -> f64) = match (ra, rb) {
-            (Role::Load, Role::Strike) => (params.strike_frames, ease_in),
-            (Role::Strike, Role::Follow) => (params.follow_frames, ease_out),
+            (Role::Load, Role::Strike) => (params.strike_frames, strike_in),
+            (Role::Strike, Role::Follow) => (follow_frames[si], follow_out),
             (Role::Load, Role::Follow) => {
                 (params.strike_frames + params.follow_frames, ease_in_out)
             }
@@ -585,6 +637,7 @@ pub fn build(
                     };
                     let free = l.clone();
                     grip_with(info, l, sw, ga + (gb - ga) * x, ra.slerp(rb, x), fit);
+                    cap_wrists(info, l, fit);
                     if w < 1.0 {
                         let o = 1 - sw;
                         for n in [info.upper[o], info.fore[o], info.hand[o]] {
@@ -598,6 +651,9 @@ pub fn build(
                 }
             }
         }
+    }
+    for l in frames_out.iter_mut() {
+        cap_wrists(info, l, fit);
     }
     (frames_out, rep)
 }
@@ -692,7 +748,7 @@ mod tests {
 
     #[test]
     fn curves_start_end_and_shape() {
-        for c in [ease_in, ease_out, ease_in_out] {
+        for c in [ease_in, ease_out, ease_in_out, strike_in, follow_out] {
             assert!(c(0.0).abs() < 1e-12 && (c(1.0) - 1.0).abs() < 1e-12);
             let mut last = 0.0;
             for i in 1..=10 {

@@ -308,6 +308,20 @@ fn cap(
     ang - max_deg
 }
 
+/// Both wrists within `wrist_max_deg` (between keys the coil and the
+/// interpolation can carry a wrist past what each key had).
+pub fn cap_wrists(info: &RigInfo, locals: &mut [Option<Trs>], params: &FitParams) {
+    for s in 0..2 {
+        cap(
+            info,
+            locals,
+            info.hand[s],
+            info.fore[s],
+            params.wrist_max_deg,
+        );
+    }
+}
+
 /// One key pose fitted onto the rig.
 #[derive(Clone, Debug)]
 pub struct KeyFit {

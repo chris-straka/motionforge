@@ -428,8 +428,12 @@ fn timing_plan_strike_and_planted_feet() {
         ..FitParams::default()
     };
     let (frames, rep) = build(&info, &keys, &tp, &fp, false);
-    assert_eq!(rep.key_frames, vec![0, 9, 16, 20, 37]);
-    assert_eq!(frames.len(), 38);
+    // Windup 9 frames, load held 4, strike 3; the follow-through's frames
+    // follow from the blade's travel, then its hold (7) and the recovery (10).
+    assert_eq!(rep.key_frames[..3], [0, 9, 16]);
+    assert_eq!(rep.key_frames[3], 16 + rep.follow_frames);
+    assert_eq!(frames.len(), rep.key_frames[4] + 1);
+    assert_eq!(rep.key_frames[4], rep.key_frames[3] + 7 + 10);
     assert!(rep.windup_found && !rep.counter_added);
     let hand = |l: &[Option<Trs>]| info.rig.world(l)[info.hand[1]].t;
     let speed: Vec<f64> = (1..frames.len())
