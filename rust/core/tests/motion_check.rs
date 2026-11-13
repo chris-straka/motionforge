@@ -299,3 +299,181 @@ fn stylize_glb_adds_clips_both_ways_and_keeps_feet() {
         }
     }
 }
+
+/// World rotation of a node at rest.
+fn rest_rot(rig: &Rig, node: usize) -> Quat {
+    rig.rest_world[node].rotation()
+}
+
+/// Turn `node` (at rest) by world rotation `r` about its head.
+fn turned(rig: &Rig, node: usize, r: Quat) -> Trs {
+    let parent = rig.parent[node].unwrap();
+    let mut t = rig.rest[node];
+    t.r = rest_rot(rig, parent)
+        .conj()
+        .mul(r)
+        .mul(rest_rot(rig, node))
+        .normalized();
+    t
+}
+
+#[test]
+fn back_and_forth_counts_jitter_not_speed() {
+    let s = subject();
+    let rig = &s.rig;
+    let fore = rig.find("DEF-forearm.R").unwrap();
+    let hand = rig.find("DEF-hand.R").unwrap();
+    let len = rig.rest[hand].t.length();
+    let fwd = motion_core::animate::forward(rig, &s.map);
+    let u = rig.head(hand) - rig.head(fore);
+    let axis = u.cross(fwd).normalized();
+    // Jitter +-theta every frame: the hand goes +-L sin(theta) about its
+    // middle, so its acceleration flips by 4 L sin(theta) each frame.
+    let theta: f64 = 0.02;
+    let n = 30;
+    let mut frames = still(rig, n);
+    for (f, fr) in frames.iter_mut().enumerate() {
+        let sign = if f % 2 == 0 { 1.0 } else { -1.0 };
+        fr[fore] = Some(turned(rig, fore, Quat::from_axis_angle(axis, sign * theta)));
+    }
+    let c = score(&s, "idle", &times(n), &frames, false);
+    let arm = c.rough.iter().find(|r| r.chain == "arm.R").unwrap();
+    let want = 4.0 * len * theta.sin() / s.k * 1000.0;
+    assert!(
+        (arm.peak_mm - want).abs() / want < 1e-3,
+        "{} vs {want}",
+        arm.peak_mm
+    );
+    assert!(
+        (arm.mean_mm - want / 2.0).abs() / want < 1e-3,
+        "{}",
+        arm.mean_mm
+    );
+    assert!(c
+        .rough
+        .iter()
+        .filter(|r| r.chain != "arm.R")
+        .all(|r| r.peak_mm < 1e-9));
+    // A fast, even swing (0.25 rad a frame, 7.5 rad/s): jerk all along
+    // (the hand's path curves), but no back-and-forth anywhere.
+    let mut swing = still(rig, n);
+    for (f, fr) in swing.iter_mut().enumerate() {
+        fr[fore] = Some(turned(
+            rig,
+            fore,
+            Quat::from_axis_angle(axis, 0.25 * f as f64),
+        ));
+    }
+    let c = score(&s, "idle", &times(n), &swing, false);
+    let arm = c.rough.iter().find(|r| r.chain == "arm.R").unwrap();
+    assert!(arm.peak_mm < 1e-6, "{arm:?}");
+    let jerk = c.jerk.iter().find(|j| j.chain == "arm.R").unwrap();
+    assert!(jerk.mean > 50.0, "{jerk:?}");
+}
+
+#[test]
+fn joint_limits_catch_backward_knees_and_elbows_only() {
+    let s = subject();
+    let rig = &s.rig;
+    let fwd = motion_core::animate::forward(rig, &s.map);
+    let n = 4;
+    assert_eq!(
+        score(&s, "idle", &times(n), &still(rig, n), false)
+            .limits
+            .frames,
+        0
+    );
+    // Bend a lower bone about its hinge by `deg` toward `toward * fwd`
+    // (positive deg) or away (negative).
+    let bend = |upper: &str, lower: &str, end: &str, toward: f64, deg: f64| {
+        let (a, b, c) = (
+            rig.find(upper).unwrap(),
+            rig.find(lower).unwrap(),
+            rig.find(end).unwrap(),
+        );
+        let u = rig.head(b) - rig.head(a);
+        let axis = u.cross(fwd).normalized();
+        let mut q = Quat::from_axis_angle(axis, deg.to_radians());
+        let v = q.rotate_vec(rig.head(c) - rig.head(b));
+        if (v.dot(fwd) * toward < 0.0) == (deg > 0.0) {
+            q = Quat::from_axis_angle(axis, -deg.to_radians());
+        }
+        let mut frames = still(rig, n);
+        for fr in frames.iter_mut() {
+            fr[b] = Some(turned(rig, b, q));
+        }
+        score(&s, "idle", &times(n), &frames, false).limits
+    };
+    // Natural bends: no violation.
+    let l = bend("DEF-upper_arm.R", "DEF-forearm.R", "DEF-hand.R", 1.0, 100.0);
+    assert_eq!(l.frames, 0, "{l:?}");
+    let l = bend("DEF-thigh.L", "DEF-shin.L", "DEF-foot.L", -1.0, 90.0);
+    assert_eq!(l.frames, 0, "{l:?}");
+    // Backward by 40 degrees: 30 past the 10 allowed.
+    let l = bend("DEF-upper_arm.R", "DEF-forearm.R", "DEF-hand.R", 1.0, -40.0);
+    assert_eq!(l.frames, n);
+    assert_eq!(l.worst, "elbow.R straighter than straight");
+    assert!((l.worst_deg - 30.0).abs() < 0.5, "{l:?}");
+    let l = bend("DEF-thigh.L", "DEF-shin.L", "DEF-foot.L", -1.0, -40.0);
+    assert_eq!(l.worst, "knee.L straighter than straight", "{l:?}");
+    assert!((l.worst_deg - 30.0).abs() < 0.5, "{l:?}");
+    // A wrist turned 100 degrees: 10 past.
+    let hand = rig.find("DEF-hand.R").unwrap();
+    let mut frames = still(rig, n);
+    for fr in frames.iter_mut() {
+        fr[hand] = Some(turned(
+            rig,
+            hand,
+            Quat::from_axis_angle(fwd, 100f64.to_radians()),
+        ));
+    }
+    let l = score(&s, "idle", &times(n), &frames, false).limits;
+    assert_eq!(l.worst, "wrist.R turned too far");
+    assert!((l.worst_deg - 10.0).abs() < 1e-6, "{l:?}");
+}
+
+#[test]
+fn an_in_place_cycle_is_scored_on_its_treadmill() {
+    // Hips still, both feet pushed back together at 0.6 m/s: a treadmill
+    // walk's stance. On the world floor that is a 12 cm skate per foot;
+    // on its own treadmill it is no skate at all.
+    let s = subject();
+    let rig = &s.rig;
+    let n = 7;
+    let speed = 0.6 * s.k;
+    let mut frames = still(rig, n);
+    for side in ["L", "R"] {
+        let (th, sh, ft) = (
+            rig.find(&format!("DEF-thigh.{side}")).unwrap(),
+            rig.find(&format!("DEF-shin.{side}")).unwrap(),
+            rig.find(&format!("DEF-foot.{side}")).unwrap(),
+        );
+        let fwd = motion_core::animate::forward(rig, &s.map);
+        let ankle = rig.head(ft);
+        for (f, fr) in frames.iter_mut().enumerate() {
+            let back = fwd.scale(-speed * f as f64 / 30.0);
+            solve_arm(
+                rig,
+                fr,
+                th,
+                sh,
+                ft,
+                ankle + back + Vec3::new(0.0, 0.03 * s.k, 0.0),
+            );
+        }
+    }
+    let c = score(&s, "walk", &times(n), &frames, false);
+    assert!((c.feet.belt_mps - 0.6).abs() < 0.05, "{:?}", c.feet);
+    assert_eq!(c.feet.skating_plants, 0, "{:?}", c.feet);
+    assert_eq!(c.feet.plants, 2, "{:?}", c.feet);
+}
+
+#[test]
+fn readability_of_a_held_t_pose() {
+    let s = subject();
+    let n = 10;
+    let c = score(&s, "idle", &times(n), &still(&s.rig, n), false);
+    // Arms out, legs apart below the hips: every limb point is clear.
+    assert!((c.read.clear - 1.0).abs() < 1e-12, "{:?}", c.read);
+    assert!(c.read.contrast_deg.abs() < 1e-9, "{:?}", c.read);
+}

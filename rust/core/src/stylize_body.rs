@@ -409,7 +409,7 @@ pub struct GlbClipReport {
 }
 
 /// Probe joints for the body-speed signal (hips first).
-fn probe_nodes(map: &crate::humanoid::Mapping) -> Vec<usize> {
+pub fn probe_nodes(map: &crate::humanoid::Mapping) -> Vec<usize> {
     let mut v = Vec::new();
     for n in [
         "DEF-spine",

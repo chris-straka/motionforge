@@ -47,6 +47,42 @@ and a giant and numbers compare across characters.
   ball); mean and peak, in m/s^3 on a 1.75 m body. The root (the hips'
   world position) is reported apart, so travel does not hide in the
   limbs. The table shows the worst chain's mean and peak.
+- **Back-and-forth** (2026-11-13; the roughness number to read before
+  jerk). Per joint relative to the hips, how far the next frame's
+  acceleration points back against this frame's:
+  `max(0, -a_f . a_f+1) / max(|a_f|, |a_f+1|)` with `a` the second
+  difference of positions. A fast even arc and a sharp single corner
+  score exactly 0 (their accelerations agree, or come alone); a joint
+  jittering +-e every frame scores 4e. Millimetres at 30 fps on a 1.75 m
+  body; per chain mean and peak, the table shows the worst chain. Jerk
+  stays in the JSON, but it ranks fast moves as rough.
+- **Joint limits** (2026-11-13). Knees and elbows as hinges: the hinge
+  axis is fixed in the upper bone (rest `upper x facing`), the bend is
+  measured in the hinge plane, positive the natural way (shin back,
+  forearm forward). Past a limit: straighter than straight by more than
+  10 deg, bent more than 160 deg, or bent out of the hinge plane by more
+  than 25 deg. Ball joints capped from their rest pose relative to a
+  parent: chest on hips 80 deg, head on chest 90, hand on forearm 90,
+  foot on shin 65. Reported: frames past any limit, the worst excess,
+  which joint and how, every joint that went past.
+- **Readability of the key poses** (2026-11-13; for comparing a clip
+  with its own variants, higher is better). Key poses are the body's
+  speed minima (the stylizer's own keys, `stylize_body::body_keys`),
+  interior ones only when there are any. *Clear*: per key pose, four
+  level orthographic views round the character's current facing (0, 45,
+  90, 135 deg); in each, the share of limb points (elbows, hands, knees,
+  ankles) further from the projected hips-chest-head line than the
+  torso's half width in that view (half the shoulder width side to
+  side, 0.3 of it front to back); the best view counts; mean over key
+  poses. *Contrast*: between successive key poses, the mean angle each
+  limb segment and the spine turned in the hips' frame. No published
+  readability score was found to copy (research notes, 2026-11-13); this
+  one is a first cut, to be checked against the owner's picks.
+- **In-place cycles** (2026-11-13). When the hips travel under 10 cm
+  over the clip and both feet's low frames move the same way at 0.3 m/s
+  or more (their median velocities agree within 37 deg), the clip is a
+  treadmill cycle: skate is measured with the feet's positions minus the
+  belt (the mean of the two medians) times time. Reported as `belt`.
 - **Attacks** (clip names containing attack, slash, cut, combo, stab,
   swing, strike, punch or kick; `--attack-clips` to change): the weapon
   hand is `--weapon` (default R). The *tip* is the blade's end when the
@@ -65,6 +101,16 @@ to change), the rate the renders use, so frame numbers match the
 pictures. Output is deterministic.
 
 ## Tests with known answers
+
+2026-11-13 additions: back-and-forth on the same +-0.02 rad forearm
+jitter is exactly `4 L sin(theta)` at its peak (half that as the chain
+mean), every other chain 0; a fast even swing (7.5 rad/s) has jerk but
+no back-and-forth; an elbow or knee bent 40 deg backward is 30 deg past
+its limit (and bent 100 or 90 deg the natural way, none); a hand turned
+100 deg is 10 past; both feet pushed back together at 0.6 m/s under
+still hips is a 0.6 m/s belt with no skate; a held T-pose is fully
+clear with zero contrast.
+
 
 `rust/core/tests/motion_check.rs`, on the procedural fixture humanoid:
 
@@ -93,8 +139,16 @@ pictures. Output is deterministic.
 motionforge motion check hero.glb                 # table + worst three of each
 motionforge motion check hero.glb --clip attack_1 --json
 python3 tools/bench/motion_sheet.py strip OUT.png 'a=hero.glb:attack_1@10,11,12!11' --view 3q
-python3 tools/bench/motion_sheet.py reel OUT.mp4 'orig=x.glb:attack_1' 'new=x.glb:attack_1_new' --trail DEF-hand.R
+python3 tools/bench/motion_sheet.py reel OUT.mp4 'orig=x.glb:attack_1' 'new=x.glb:attack_1_new' --trail DEF-hand.R \
+    --prop sword.glb@Socket_Hand_R
+python3 tools/bench/motion_compare.py base=before.json new=after.json [--suffix _new]
 ```
+
+Renders are painted (the character's own colour texture, Workbench
+studio light, shadows) since 2026-11-13; `--grey` for the old flat
+colour. The floor is a 10 cm grid texture. `--prop` holds a model (the
+hero's sword) at a socket. `motion_compare.py` totals each measure over
+the set and lists every clip's changes, marking the ones that got worse.
 
 `motion_sheet.py` (stdlib, Blender + ffmpeg) renders frames on one fixed
 camera over a 10 cm grid (a sliding foot moves against the grid), with
@@ -120,11 +174,12 @@ three worst of each measure: `tools/bench/motion_sheet.py strip`
 
 Where the numbers mislead:
 
-- **In-place locomotion** (walk, jog, run): the clip
-  carries no travel, so a planted foot slides backwards at walking speed.
-  That is faster than the plant cut-off (0.75 m/s), so it is a step, not
-  a skate, and those clips score 0. Skate on them needs the game's travel
-  speed added; not done.
+- **In-place locomotion** (walk, jog, run): until 2026-11-13 these scored
+  0 skate (the stance foot slides back faster than the plant cut-off).
+  Now measured on their own treadmill (above): walk 74% of frames in a
+  skating plant but 5.4 cm in all (worst plant 2.8 cm), jog 58% / 14.4
+  cm, run 0. The belt is a median, so a gait whose stance speed varies
+  shows a little skate even when it matches the game's speed.
 - **Jerk ranks speed** as much as roughness. Compare a clip's jerk with
   clips of its own kind (attacks with attacks), and read the jerk strip
   before calling a clip jittery.

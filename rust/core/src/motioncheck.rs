@@ -39,6 +39,7 @@
 //! child and a giant. Deterministic: fixed frame order, no maps.
 
 use crate::contact::{check_frames, Body, Options};
+use crate::detmath;
 use crate::glb::{Affine, Document};
 use crate::humanoid::{self, Mapping};
 use crate::json::Json;
@@ -57,6 +58,25 @@ pub const PLANT_SPEED: f64 = 0.75;
 pub const SINK_DEPTH: f64 = 0.01;
 /// Hold: hand under this share of its peak speed.
 pub const HOLD_SHARE: f64 = 0.15;
+/// Joint limits, degrees: a knee or elbow straighter than straight by
+/// more than this...
+pub const LIMIT_HYPEREXTEND_DEG: f64 = 10.0;
+/// ...or bent further than this...
+pub const LIMIT_FLEX_DEG: f64 = 160.0;
+/// ...or bent sideways (out of its hinge plane) by more than this.
+pub const LIMIT_SIDEWAYS_DEG: f64 = 25.0;
+/// Ball joints: turned this far from their rest pose (relative to the
+/// parent named in `Subject`): chest on hips, head on chest, hand on
+/// forearm, foot on shin.
+pub const LIMIT_TORSO_DEG: f64 = 80.0;
+pub const LIMIT_HEAD_DEG: f64 = 90.0;
+pub const LIMIT_WRIST_DEG: f64 = 90.0;
+pub const LIMIT_ANKLE_DEG: f64 = 65.0;
+/// An in-place cycle: the hips travel less than this (m) over the clip
+/// while the planted foot moves at least `BELT_SPEED` (m/s): its skate is
+/// measured on the treadmill the game will move it on.
+pub const BELT_TRAVEL: f64 = 0.10;
+pub const BELT_SPEED: f64 = 0.3;
 
 /// Name fragments of clips scored as attacks.
 pub const ATTACK_WORDS: [&str; 9] = [
@@ -87,6 +107,39 @@ pub struct Subject {
     feet: Vec<Foot>,
     hips: usize,
     chains: Vec<(String, Vec<usize>)>,
+    hinges: Vec<Hinge>,
+    caps: Vec<Cap>,
+    /// Character facing (rest, horizontal) and lateral axis (its left).
+    forward: Vec3,
+    /// Shoulder width at rest, metres.
+    shoulder_w: f64,
+    /// Body-speed probes (hips first), as the stylizer's keys use them.
+    probes: Vec<usize>,
+    /// Torso line for readability: hips, chest, head.
+    torso: Vec<usize>,
+    /// Limb points that should read apart from the torso.
+    limbs: Vec<usize>,
+}
+
+/// A hinge joint (knee, elbow): bend about one axis fixed in the upper
+/// bone, measured from the three joint heads.
+struct Hinge {
+    name: String,
+    a: usize,
+    b: usize,
+    c: usize,
+    /// Hinge axis in `a`'s frame.
+    axis_local: Vec3,
+    /// +1 or -1 so that the joint's natural bend is positive.
+    sign: f64,
+}
+
+/// A ball joint capped at an angle from its rest pose relative to `parent`.
+struct Cap {
+    name: String,
+    node: usize,
+    parent: usize,
+    max_deg: f64,
 }
 
 impl Subject {
@@ -141,6 +194,88 @@ impl Subject {
             ));
         }
         chains.retain(|(_, nodes)| !nodes.is_empty());
+        let forward = crate::animate::forward(&rig, &map);
+        let mut hinges = Vec::new();
+        for side in ["L", "R"] {
+            for (joint, upper, lower, end, toward) in [
+                ("knee", "thigh", "shin", "foot", -1.0),
+                ("elbow", "upper_arm", "forearm", "hand", 1.0),
+            ] {
+                let get = |b: &str| map.node_of(&format!("DEF-{b}.{side}"));
+                let (Some(a), Some(b), Some(c)) = (get(upper), get(lower), get(end)) else {
+                    continue;
+                };
+                let u = rig.head(b) - rig.head(a);
+                let axis = u.cross(forward);
+                if u.length() < 1e-9 || axis.length() < 1e-6 * u.length() {
+                    continue;
+                }
+                let axis = axis.normalized();
+                // The natural bend swings the lower bone toward `toward`
+                // times the facing (knee back, elbow forward).
+                let v_bent = u.normalized() + forward.scale(0.2 * toward);
+                let sign = if u.cross(v_bent).dot(axis) >= 0.0 {
+                    1.0
+                } else {
+                    -1.0
+                };
+                hinges.push(Hinge {
+                    name: format!("{joint}.{side}"),
+                    a,
+                    b,
+                    c,
+                    axis_local: rig.rest_world[a].rotation().conj().rotate_vec(axis),
+                    sign,
+                });
+            }
+        }
+        let mut caps = Vec::new();
+        let mut cap = |name: &str, node: &str, parent: &str, max_deg: f64| {
+            if let (Some(n), Some(p)) = (map.node_of(node), map.node_of(parent)) {
+                caps.push(Cap {
+                    name: name.to_string(),
+                    node: n,
+                    parent: p,
+                    max_deg,
+                });
+            }
+        };
+        cap("torso", "DEF-spine.003", "DEF-spine", LIMIT_TORSO_DEG);
+        cap("head", "DEF-spine.006", "DEF-spine.003", LIMIT_HEAD_DEG);
+        for side in ["L", "R"] {
+            cap(
+                &format!("wrist.{side}"),
+                &format!("DEF-hand.{side}"),
+                &format!("DEF-forearm.{side}"),
+                LIMIT_WRIST_DEG,
+            );
+            cap(
+                &format!("ankle.{side}"),
+                &format!("DEF-foot.{side}"),
+                &format!("DEF-shin.{side}"),
+                LIMIT_ANKLE_DEG,
+            );
+        }
+        let shoulder_w = match (
+            map.node_of("DEF-upper_arm.L"),
+            map.node_of("DEF-upper_arm.R"),
+        ) {
+            (Some(l), Some(r)) => (rig.head(l) - rig.head(r)).length(),
+            _ => 0.22 * height,
+        };
+        let probes = crate::stylize_body::probe_nodes(&map);
+        let torso: Vec<usize> = ["DEF-spine", "DEF-spine.003", "DEF-spine.006"]
+            .iter()
+            .filter_map(|n| map.node_of(n))
+            .collect();
+        let mut limbs = Vec::new();
+        for side in ["L", "R"] {
+            for b in ["forearm", "hand", "shin", "foot"] {
+                if let Some(n) = map.node_of(&format!("DEF-{b}.{side}")) {
+                    limbs.push(n);
+                }
+            }
+        }
         Ok(Subject {
             k: height / REF_HEIGHT,
             rig,
@@ -151,6 +286,13 @@ impl Subject {
             feet,
             hips,
             chains,
+            hinges,
+            caps,
+            forward,
+            shoulder_w,
+            probes,
+            torso,
+            limbs,
         })
     }
 }
@@ -183,6 +325,9 @@ pub struct FeetScore {
     pub sink_m: f64,
     pub float_frames: usize,
     pub float_m: f64,
+    /// Treadmill speed an in-place cycle was measured on (m/s at
+    /// reference height), 0 when the clip travels.
+    pub belt_mps: f64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -194,6 +339,47 @@ pub struct ClipThrough {
     pub proxy_frames: usize,
     pub proxy_depth_m: f64,
     pub contacts: Vec<String>,
+}
+
+/// Back-and-forth: per joint and frame, how far the next frame's
+/// acceleration (second difference) points back against this frame's,
+/// `max(0, -a_f . a_f+1) / max(|a_f|, |a_f+1|)`. A fast arc or a sharp
+/// corner scores 0 (its accelerations agree or come alone); a joint that
+/// jitters +-e every frame scores 4e. Millimetres at 30 fps on a 1.75 m
+/// body, relative to the hips.
+#[derive(Clone, Debug)]
+pub struct RoughScore {
+    pub chain: String,
+    pub mean_mm: f64,
+    pub peak_mm: f64,
+    pub peak_frame: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LimitScore {
+    /// Frames with any joint past its limit.
+    pub frames: usize,
+    /// Worst excess past a limit, degrees, which joint and how, and when.
+    pub worst_deg: f64,
+    pub worst: String,
+    pub worst_frame: usize,
+    /// Every joint and way that went past, sorted.
+    pub joints: Vec<String>,
+}
+
+/// How a clip's key poses read (higher is better; for comparing a clip
+/// with its own variants).
+#[derive(Clone, Debug, Default)]
+pub struct ReadScore {
+    /// Key poses (the body's speed minima, as the stylizer finds them).
+    pub keys: Vec<usize>,
+    /// Mean over key poses of the best view's share of limb points
+    /// (elbows, hands, knees, ankles) clear of the torso's silhouette,
+    /// over four views round the character (orthographic, level).
+    pub clear: f64,
+    /// Mean change between successive key poses: the angle each limb
+    /// segment and the spine turned in the hips' frame, degrees.
+    pub contrast_deg: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -230,6 +416,9 @@ pub struct ClipScore {
     pub through: Option<ClipThrough>,
     pub jerk: Vec<JerkScore>,
     pub root_jerk: JerkScore,
+    pub rough: Vec<RoughScore>,
+    pub limits: LimitScore,
+    pub read: ReadScore,
     pub attack: Option<AttackScore>,
 }
 
@@ -262,8 +451,60 @@ pub fn score(
     let dt = if dt > 1e-9 { dt } else { 1.0 / 30.0 };
     let pos = |f: usize, node: usize| world[f][node].t;
 
+    // Treadmill for an in-place cycle: the planted feet's median
+    // horizontal velocity, when the hips go nowhere.
+    let belt = {
+        let travel = if n > 1 {
+            flat(pos(n - 1, subject.hips) - pos(0, subject.hips)).length()
+        } else {
+            0.0
+        };
+        // Per foot, the median velocity of its low frames; a treadmill
+        // when every foot's agrees (a single foot skimming the floor while
+        // the other stands is a step, not a belt).
+        let mut per_foot: Vec<Vec3> = Vec::new();
+        if travel < BELT_TRAVEL * k && n >= 3 {
+            for foot in &subject.feet {
+                let mut vx = Vec::new();
+                let mut vz = Vec::new();
+                for f in 1..n - 1 {
+                    let (node, h) = foot
+                        .points
+                        .iter()
+                        .map(|&(nd, y)| (nd, pos(f, nd).y - y))
+                        .fold((0, f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
+                    if h < CONTACT_HEIGHT * k {
+                        let v = (pos(f + 1, node) - pos(f - 1, node)).scale(1.0 / (2.0 * dt));
+                        vx.push(v.x);
+                        vz.push(v.z);
+                    }
+                }
+                per_foot.push(Vec3::new(median(&mut vx), 0.0, median(&mut vz)));
+            }
+        }
+        let agree = !per_foot.is_empty()
+            && per_foot.iter().all(|v| v.length() >= BELT_SPEED * k)
+            && per_foot
+                .iter()
+                .all(|v| v.normalized().dot(per_foot[0].normalized()) > 0.8);
+        if agree {
+            per_foot
+                .iter()
+                .fold(Vec3::ZERO, |a, v| a + *v)
+                .scale(1.0 / per_foot.len() as f64)
+        } else {
+            Vec3::ZERO
+        }
+    };
+    let t0 = times.first().copied().unwrap_or(0.0);
+    // Foot positions on the treadmill (the world's when there is none).
+    let fpos = |f: usize, node: usize| pos(f, node) - belt.scale(times[f] - t0);
+
     // Feet.
-    let mut feet = FeetScore::default();
+    let mut feet = FeetScore {
+        belt_mps: belt.length() / k,
+        ..FeetScore::default()
+    };
     let mut skating = vec![false; n];
     let mut lowest_any = vec![f64::INFINITY; n];
     for foot in &subject.feet {
@@ -288,7 +529,7 @@ pub fn score(
             if b == a {
                 return 0.0;
             }
-            flat(pos(b, node) - pos(a, node)).length() / ((b - a) as f64 * dt)
+            flat(fpos(b, node) - fpos(a, node)).length() / ((b - a) as f64 * dt)
         };
         let planted: Vec<bool> = (0..n)
             .map(|f| low_h[f] < CONTACT_HEIGHT * k && speed(f) < PLANT_SPEED * k)
@@ -309,7 +550,7 @@ pub fn score(
             }
             feet.plants += 1;
             let slide: f64 = (a..b - 1)
-                .map(|g| flat(pos(g + 1, low_node[g]) - pos(g, low_node[g])).length())
+                .map(|g| flat(fpos(g + 1, low_node[g]) - fpos(g, low_node[g])).length())
                 .sum::<f64>()
                 / k;
             if slide > feet.worst_plant_m {
@@ -412,6 +653,247 @@ pub fn score(
         .collect();
     let root_jerk = jerk_of("root", &|f| vec![pos(f, hips)]);
 
+    // Back-and-forth (jitter that a fast clean move does not trip).
+    let rough: Vec<RoughScore> = subject
+        .chains
+        .iter()
+        .map(|(cname, nodes)| {
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            let mut peak = 0.0;
+            let mut peak_frame = 0;
+            if n >= 4 {
+                let p: Vec<Vec<Vec3>> = (0..n)
+                    .map(|f| nodes.iter().map(|&j| pos(f, j) - pos(f, hips)).collect())
+                    .collect();
+                let acc = |f: usize, j: usize| p[f + 1][j] - p[f][j].scale(2.0) + p[f - 1][j];
+                for f in 1..n - 2 {
+                    for j in 0..nodes.len() {
+                        let (a, b) = (acc(f, j), acc(f + 1, j));
+                        let big = a.length().max(b.length());
+                        let rev = if big > 0.0 {
+                            (-a.dot(b)).max(0.0) / big
+                        } else {
+                            0.0
+                        };
+                        let mm = rev / k * 1000.0;
+                        sum += mm;
+                        count += 1;
+                        if mm > peak {
+                            peak = mm;
+                            peak_frame = f;
+                        }
+                    }
+                }
+            }
+            RoughScore {
+                chain: cname.clone(),
+                mean_mm: if count > 0 { sum / count as f64 } else { 0.0 },
+                peak_mm: peak,
+                peak_frame,
+            }
+        })
+        .collect();
+
+    // Joint limits.
+    let mut limits = LimitScore::default();
+    {
+        let mut past = vec![false; n];
+        let mut note = |limits: &mut LimitScore, f: usize, what: String, excess: f64| {
+            if excess <= 0.0 {
+                return;
+            }
+            past[f] = true;
+            if excess > limits.worst_deg {
+                limits.worst_deg = excess;
+                limits.worst = what.clone();
+                limits.worst_frame = f;
+            }
+            if !limits.joints.contains(&what) {
+                limits.joints.push(what);
+            }
+        };
+        for f in 0..n {
+            for h in &subject.hinges {
+                let u = pos(f, h.b) - pos(f, h.a);
+                let v = pos(f, h.c) - pos(f, h.b);
+                if u.length() < 1e-9 || v.length() < 1e-9 {
+                    continue;
+                }
+                let axis = world[f][h.a]
+                    .rotation()
+                    .rotate_vec(h.axis_local)
+                    .normalized();
+                // Bend in the hinge plane (both bones projected onto it).
+                let up = u - axis.scale(u.dot(axis));
+                let vp = v - axis.scale(v.dot(axis));
+                let flex = if up.length() < 1e-9 || vp.length() < 1e-9 {
+                    0.0
+                } else {
+                    let c = (up.dot(vp) / (up.length() * vp.length())).clamp(-1.0, 1.0);
+                    let s = if up.cross(vp).dot(axis) >= 0.0 {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    h.sign * s * detmath::acos(c).to_degrees()
+                };
+                let side = (detmath::asin(v.normalized().dot(axis).clamp(-1.0, 1.0))
+                    - detmath::asin(u.normalized().dot(axis).clamp(-1.0, 1.0)))
+                .to_degrees();
+                note(
+                    &mut limits,
+                    f,
+                    format!("{} straighter than straight", h.name),
+                    -flex - LIMIT_HYPEREXTEND_DEG,
+                );
+                note(
+                    &mut limits,
+                    f,
+                    format!("{} bent too far", h.name),
+                    flex - LIMIT_FLEX_DEG,
+                );
+                note(
+                    &mut limits,
+                    f,
+                    format!("{} bent sideways", h.name),
+                    side.abs() - LIMIT_SIDEWAYS_DEG,
+                );
+            }
+            for c in &subject.caps {
+                let rel = world[f][c.parent]
+                    .rotation()
+                    .conj()
+                    .mul(world[f][c.node].rotation());
+                let rest = rig.rest_world[c.parent]
+                    .rotation()
+                    .conj()
+                    .mul(rig.rest_world[c.node].rotation());
+                let deg = rest.angle_to(rel).to_degrees();
+                note(
+                    &mut limits,
+                    f,
+                    format!("{} turned too far", c.name),
+                    deg - c.max_deg,
+                );
+            }
+        }
+        limits.frames = past.iter().filter(|p| **p).count();
+        limits.joints.sort();
+    }
+
+    // Readability of the key poses.
+    let read = {
+        let probes: Vec<Vec<Vec3>> = (0..n)
+            .map(|f| subject.probes.iter().map(|&p| pos(f, p)).collect())
+            .collect();
+        let keys = if n >= 3 {
+            crate::stylize_body::body_keys(
+                &crate::stylize_body::raw_speed(&probes, 1.0 / dt),
+                0.25,
+                3,
+            )
+        } else {
+            (0..n).collect()
+        };
+        let poses: Vec<usize> = if keys.len() > 2 {
+            keys[1..keys.len() - 1].to_vec()
+        } else {
+            keys.clone()
+        };
+        let up = Vec3::new(0.0, 1.0, 0.0);
+        let hips_turn = |f: usize| {
+            world[f][hips]
+                .rotation()
+                .mul(rig.rest_world[hips].rotation().conj())
+        };
+        let mut clear_sum = 0.0;
+        for &f in &poses {
+            let face = flat(hips_turn(f).rotate_vec(subject.forward));
+            let face = if face.length() > 1e-9 {
+                face.normalized()
+            } else {
+                subject.forward
+            };
+            let lat = up.cross(face);
+            let torso: Vec<Vec3> = subject.torso.iter().map(|&t| pos(f, t)).collect();
+            let mut best: f64 = 0.0;
+            for step in 0..4 {
+                let a = step as f64 * std::f64::consts::FRAC_PI_4;
+                let (sa, ca) = detmath::sin_cos(a);
+                let d = face.scale(ca) + lat.scale(sa);
+                let right = up.cross(d).normalized();
+                let r =
+                    subject.shoulder_w * (0.5 * right.dot(lat).abs() + 0.3 * right.dot(face).abs());
+                let pr = |p: Vec3| (p.dot(right), p.y);
+                let line: Vec<(f64, f64)> = torso.iter().map(|&p| pr(p)).collect();
+                let clear = subject
+                    .limbs
+                    .iter()
+                    .filter(|&&l| seg_dist(pr(pos(f, l)), &line) >= r)
+                    .count();
+                if !subject.limbs.is_empty() {
+                    best = best.max(clear as f64 / subject.limbs.len() as f64);
+                }
+            }
+            clear_sum += best;
+        }
+        let segs: Vec<(usize, usize)> = {
+            let mut v = Vec::new();
+            let mut add = |a: &str, b: &str| {
+                if let (Some(x), Some(y)) = (subject.map.node_of(a), subject.map.node_of(b)) {
+                    v.push((x, y));
+                }
+            };
+            add("DEF-spine", "DEF-spine.006");
+            for side in ["L", "R"] {
+                add(
+                    &format!("DEF-upper_arm.{side}"),
+                    &format!("DEF-forearm.{side}"),
+                );
+                add(&format!("DEF-forearm.{side}"), &format!("DEF-hand.{side}"));
+                add(&format!("DEF-thigh.{side}"), &format!("DEF-shin.{side}"));
+                add(&format!("DEF-shin.{side}"), &format!("DEF-foot.{side}"));
+            }
+            v
+        };
+        let dir = |f: usize, (a, b): (usize, usize)| {
+            world[f][hips]
+                .rotation()
+                .conj()
+                .rotate_vec(pos(f, b) - pos(f, a))
+                .normalized()
+        };
+        let mut contrast = 0.0;
+        let pairs = keys.len().saturating_sub(1);
+        for w in keys.windows(2) {
+            if segs.is_empty() {
+                break;
+            }
+            let m: f64 = segs
+                .iter()
+                .map(|&sg| {
+                    detmath::acos(dir(w[0], sg).dot(dir(w[1], sg)).clamp(-1.0, 1.0)).to_degrees()
+                })
+                .sum::<f64>()
+                / segs.len() as f64;
+            contrast += m;
+        }
+        ReadScore {
+            clear: if poses.is_empty() {
+                0.0
+            } else {
+                clear_sum / poses.len() as f64
+            },
+            contrast_deg: if pairs > 0 {
+                contrast / pairs as f64
+            } else {
+                0.0
+            },
+            keys,
+        }
+    };
+
     // Attack.
     let attack = if attack && n >= 3 {
         let side = subject
@@ -513,8 +995,46 @@ pub fn score(
         through,
         jerk,
         root_jerk,
+        rough,
+        limits,
+        read,
         attack,
     }
+}
+
+/// Median (0 for none); sorts `v`.
+fn median(v: &mut [f64]) -> f64 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let m = v.len() / 2;
+    if v.len() % 2 == 1 {
+        v[m]
+    } else {
+        0.5 * (v[m - 1] + v[m])
+    }
+}
+
+/// Distance from a 2D point to a polyline.
+fn seg_dist(p: (f64, f64), line: &[(f64, f64)]) -> f64 {
+    let mut best = f64::INFINITY;
+    if line.len() == 1 {
+        return ((p.0 - line[0].0).powi(2) + (p.1 - line[0].1).powi(2)).sqrt();
+    }
+    for w in line.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let l2 = dx * dx + dy * dy;
+        let t = if l2 > 0.0 {
+            (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / l2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (qx, qy) = (a.0 + t * dx, a.1 + t * dy);
+        best = best.min(((p.0 - qx).powi(2) + (p.1 - qy).powi(2)).sqrt());
+    }
+    best
 }
 
 /// Score every clip of a rigged GLB (or those named in `only`).
@@ -586,6 +1106,7 @@ impl ClipScore {
                     ("sink_cm", cm(f.sink_m)),
                     ("float_frames", Json::num(f.float_frames as f64)),
                     ("float_cm", cm(f.float_m)),
+                    ("belt_mps", Json::num(r(f.belt_mps, 3))),
                 ]),
             ),
         ];
@@ -611,6 +1132,54 @@ impl ClipScore {
             Json::Arr(self.jerk.iter().map(JerkScore::to_json).collect()),
         ));
         fields.push(("root_jerk", self.root_jerk.to_json()));
+        fields.push((
+            "rough",
+            Json::Arr(
+                self.rough
+                    .iter()
+                    .map(|x| {
+                        Json::obj(vec![
+                            ("chain", Json::str(&x.chain)),
+                            ("mean_mm", Json::num(r(x.mean_mm, 3))),
+                            ("peak_mm", Json::num(r(x.peak_mm, 2))),
+                            ("peak_frame", Json::num(x.peak_frame as f64)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ));
+        let l = &self.limits;
+        fields.push((
+            "limits",
+            Json::obj(vec![
+                ("frames", Json::num(l.frames as f64)),
+                ("share", Json::num(r(l.frames as f64 / n, 4))),
+                ("worst_deg", Json::num(r(l.worst_deg, 1))),
+                ("worst", Json::str(&l.worst)),
+                ("worst_frame", Json::num(l.worst_frame as f64)),
+                (
+                    "joints",
+                    Json::Arr(l.joints.iter().map(|c| Json::str(c)).collect()),
+                ),
+            ]),
+        ));
+        fields.push((
+            "read",
+            Json::obj(vec![
+                (
+                    "keys",
+                    Json::Arr(
+                        self.read
+                            .keys
+                            .iter()
+                            .map(|k| Json::num(*k as f64))
+                            .collect(),
+                    ),
+                ),
+                ("clear", Json::num(r(self.read.clear, 3))),
+                ("contrast_deg", Json::num(r(self.read.contrast_deg, 1))),
+            ]),
+        ));
         if let Some(a) = &self.attack {
             fields.push((
                 "attack",
@@ -630,6 +1199,18 @@ impl ClipScore {
             ));
         }
         Json::obj(fields)
+    }
+
+    /// Largest chain mean back-and-forth (mm) and its chain.
+    pub fn rough_worst(&self) -> (&str, f64, f64) {
+        let mut best: Option<&RoughScore> = None;
+        for j in &self.rough {
+            if best.is_none_or(|b| j.mean_mm > b.mean_mm) {
+                best = Some(j);
+            }
+        }
+        best.map(|j| (j.chain.as_str(), j.mean_mm, j.peak_mm))
+            .unwrap_or(("-", 0.0, 0.0))
     }
 
     /// One text line (two for attacks).
@@ -660,6 +1241,27 @@ impl ClipScore {
             jc,
             self.root_jerk.mean
         );
+        let (rc, rm, rp) = self.rough_worst();
+        let l = &self.limits;
+        s.push_str(&format!(
+            "{:<18} rough {:>5.2}/{:>5.1} mm {:<6} limits {:>3} fr (worst {:>4.0} deg {} f{})  read clear {:.2} contrast {:>4.1} deg ({} keys){}\n",
+            "",
+            rm,
+            rp,
+            rc,
+            l.frames,
+            l.worst_deg,
+            if l.worst.is_empty() { "-" } else { l.worst.as_str() },
+            l.worst_frame,
+            self.read.clear,
+            self.read.contrast_deg,
+            self.read.keys.len(),
+            if f.belt_mps > 0.0 {
+                format!("  belt {:.2} m/s", f.belt_mps)
+            } else {
+                String::new()
+            }
+        ));
         if let Some(a) = &self.attack {
             s.push_str(&format!(
                 "{:<18} attack: peak {:.2} s tip {:.1} m/s hand {:.1} m/s, windup {:.2} s, strike {:.2} s, hold {} fr, root {:.0} cm (reach {:.0})\n",
