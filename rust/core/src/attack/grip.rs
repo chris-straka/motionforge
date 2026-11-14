@@ -63,7 +63,11 @@ pub struct PalmHold {
 
 fn chain(info: &RigInfo, finger: &str, s: usize) -> Option<[usize; 3]> {
     let side = ["L", "R"][s];
-    let f = |k: usize| info.rig.find(&format!("DEF-{finger}.0{k}.{side}"));
+    // Through the name mapper, so a Mixamo or other rig's fingers count.
+    let f = |k: usize| {
+        let name = format!("DEF-{finger}.0{k}.{side}");
+        info.map.node_of(&name).or_else(|| info.rig.find(&name))
+    };
     Some([f(1)?, f(2)?, f(3)?])
 }
 
@@ -90,13 +94,20 @@ pub fn palm_hold(info: &RigInfo, s: usize, unit: f64) -> Option<PalmHold> {
     }
     let fd = along.normalized();
     let kn = (ki - kp).normalized();
-    // The palm's side: where the middle finger's second joint goes when
-    // its first curls.
-    let mut l: Vec<Option<Trs>> = vec![None; rig.names.len()];
-    l[middle[0]] = Some(bent(info, middle[0], 0.5));
-    let moved = rig.world(&l)[middle[1]].t - rig.head(middle[1]);
+    // The palm's side: the thumb's root sits on it, below the knuckle
+    // line. Without a thumb, where the middle finger's second joint goes
+    // when its first curls (a Rigify finger's curl axis; other rigs curl
+    // about other local axes, so the thumb comes first).
     let mut palm = fd.cross(kn).normalized();
-    if moved.dot(palm) < 0.0 {
+    let toward = match chain(info, "thumb", s) {
+        Some(thumb) => rig.head(thumb[0]) - (ki + kp).scale(0.5),
+        None => {
+            let mut l: Vec<Option<Trs>> = vec![None; rig.names.len()];
+            l[middle[0]] = Some(bent(info, middle[0], 0.5));
+            rig.world(&l)[middle[1]].t - rig.head(middle[1])
+        }
+    };
+    if toward.dot(palm) < 0.0 {
         palm = palm.scale(-1.0);
     }
     let centre = (ki + kp).scale(0.5)
