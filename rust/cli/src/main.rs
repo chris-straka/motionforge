@@ -38,6 +38,7 @@ commands:\n\
   standardize    rig GLB -> standard humanoid skeleton (DEF-* names, canonical parents)\n\
   animate        retarget clip GLBs onto a rigged GLB (+ contact pass)\n\
   motion check   score each clip of a rigged GLB: foot skate, ground, limbs in the body, jerk, attack timing\n\
+  attack         a sword attack authored from the sword's path (grip and tip keys), solved onto a rig\n\
   clean          fix a rigged GLB's own clips: floor offset, feet under the floor, sliding plants, arms in the body\n\
   grip           find a weapon clip set's grip, write it into the hand socket\n\
   keypose        key-pose drawings (landmarks JSON) -> a timed attack clip on a rigged GLB\n\
@@ -55,6 +56,10 @@ commands:\n\
 retarget flags:\n\
   --source <clip> --target <skeleton|clip> --map <bonemap> --output <clip>\n\
   --yaw auto|flip|none (default auto)  --pin|--no-pin (default --pin)\n\
+\n\
+attack flags:\n\
+  --rig <rigged glb> --output <glb>  --preset cleave|backcut|sweep|thrust|all (repeatable)  --spec <json> (repeatable)\n\
+  --name <clip> (one spec)  --prefix <p> (clip names)  --report <json>\n\
 \n\
 clean flags:\n\
   --input <rigged glb> --output <glb>  --clip <name> (repeatable; default all)\n\
@@ -722,6 +727,7 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "animate" => glb_cmds::cmd_animate(&args),
             "motion-check" => glb_cmds::cmd_motion_check(&args),
             "clean" => glb_cmds::cmd_clean(&args),
+            "attack" => glb_cmds::cmd_attack(&args),
             "grip" => glb_cmds::cmd_grip(&args),
             "keypose" => keypose_cmd::cmd_keypose(&args),
             "pose-test" => glb_cmds::cmd_pose_test(&args),

@@ -1002,6 +1002,77 @@ pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
     Ok(r)
 }
 
+/// `motionforge attack`: a sword attack authored from the sword's path
+/// (`motion_core::attack`), solved onto a rigged GLB as a clip.
+pub fn cmd_attack(cmd: &Cmd) -> CmdResult {
+    use motion_core::attack::{build, parse_spec, preset, PRESETS};
+    let input = cmd.required("rig")?;
+    let output = cmd.required("output")?;
+    let mut doc = load(input)?;
+    let mut specs: Vec<String> = Vec::new();
+    for p in cmd.all("preset").iter().flat_map(|p| p.split(',')) {
+        let p = p.trim();
+        if p == "all" {
+            specs.extend(PRESETS.iter().map(|n| preset(n).unwrap().to_string()));
+        } else if !p.is_empty() {
+            specs.push(
+                preset(p)
+                    .ok_or((
+                        1,
+                        format!("no preset '{}' (have: {})", p, PRESETS.join(", ")),
+                    ))?
+                    .to_string(),
+            );
+        }
+    }
+    for path in cmd.all("spec") {
+        specs.push(std::fs::read_to_string(path).map_err(|e| (2, format!("{path}: {e}")))?);
+    }
+    if specs.is_empty() {
+        return Err((1, "give --spec <json> or --preset <name|all>".into()));
+    }
+    let prefix = cmd.get("prefix").unwrap_or("");
+    let mut r = String::from("=== motionforge attack ===\n");
+    let mut reports = Vec::new();
+    for text in &specs {
+        let spec = parse_spec(text).map_err(|e| (2, e))?;
+        let name = match (cmd.get("name"), specs.len()) {
+            (Some(n), 1) => n.to_string(),
+            _ => format!("{}{}", prefix, spec.name),
+        };
+        let (out, rep) = build(&doc, &spec, Some(&name)).map_err(|e| (3, e))?;
+        doc = out;
+        r.push_str(&format!(
+            "clip {}: {} frames at {} fps, keys {}; grip off by up to {:.1}% of height (frame {}), blade off by up to {:.1} deg, hips lowered {:.1}% so the legs reach, feet off by {:.2}%\n",
+            rep.name,
+            rep.frames,
+            rep.fps,
+            rep.keys
+                .iter()
+                .zip(&rep.key_miss)
+                .map(|((f, role), m)| format!(
+                    "{role}@{f}[grip {:.1}% blade {:.0}deg]",
+                    m.grip * 100.0,
+                    m.blade_deg
+                ))
+                .collect::<Vec<_>>()
+                .join(" "),
+            rep.worst.grip * 100.0,
+            rep.worst_grip_frame,
+            rep.worst.blade_deg,
+            rep.worst.drop * 100.0,
+            rep.worst.foot * 100.0
+        ));
+        reports.push(rep.to_json());
+    }
+    save(&doc, output)?;
+    if let Some(path) = cmd.get("report") {
+        std::fs::write(path, pretty(&Json::Arr(reports))?).map_err(|e| (3, e.to_string()))?;
+    }
+    r.push_str(&format!("output: {}\n", output));
+    Ok(r)
+}
+
 /// `motionforge clean`: the clean-up pass on a GLB's own clips
 /// (`motion_core::clean`).
 pub fn cmd_clean(cmd: &Cmd) -> CmdResult {

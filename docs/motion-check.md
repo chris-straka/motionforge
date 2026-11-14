@@ -260,3 +260,5 @@ Where the numbers mislead:
 - **Ground and through-body interact**: a clip sunk into the floor puts
   the arms "inside" the thigh and hip mesh too.
 
+
+Attacks authored to these measures: `docs/attack.md`.

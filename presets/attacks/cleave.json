@@ -1,0 +1,261 @@
+{
+ "format": "motionforge-attack",
+ "version": 1,
+ "name": "cleave",
+ "note": "A forehand diagonal cut: from behind the right shoulder, over the top, down to the left hip.",
+ "hand": "R",
+ "fps": 30,
+ "keys": [
+  {
+   "role": "ready",
+   "grip": [
+    -0.17,
+    0.56,
+    0.12
+   ],
+   "blade": [
+    0.1,
+    0.9,
+    0.42
+   ],
+   "off": "free"
+  },
+  {
+   "role": "coil",
+   "t": 0.13,
+   "ease": "inout",
+   "grip": [
+    -0.17,
+    0.736,
+    -0.0395
+   ],
+   "blade": [
+    -0.175,
+    0.625,
+    -0.2
+   ],
+   "feet": {
+    "R": [
+     -0.05,
+     -0.13,
+     -40
+    ]
+   },
+   "hips": {
+    "turn": -20.0,
+    "drop": 0.02,
+    "shift": [
+     -0.01,
+     -0.015
+    ]
+   },
+   "torso": {
+    "twist": -17.5,
+    "lean": -2.5,
+    "side": 0.0
+   }
+  },
+  {
+   "grip": [
+    -0.17,
+    0.88,
+    -0.17
+   ],
+   "blade": [
+    -0.45,
+    0.35,
+    -0.82
+   ],
+   "hips": {
+    "turn": -40,
+    "drop": 0.04,
+    "shift": [
+     -0.02,
+     -0.03
+    ]
+   },
+   "torso": {
+    "twist": -35,
+    "lean": -5
+   },
+   "role": "windup",
+   "t": 0.14,
+   "hold": 0.07,
+   "ease": "inout",
+   "feet": {
+    "L": [
+     0.04,
+     0.17,
+     10
+    ]
+   }
+  },
+  {
+   "grip": [
+    -0.07,
+    0.86,
+    0.12
+   ],
+   "blade": [
+    0.05,
+    1.0,
+    0.2
+   ],
+   "role": "swing",
+   "t": 0.07,
+   "ease": "in",
+   "hips": {
+    "turn": -10.0,
+    "drop": 0.085,
+    "shift": [
+     0.005,
+     0.03
+    ]
+   },
+   "torso": {
+    "twist": -5.0,
+    "lean": 11.5,
+    "side": 0.0
+   }
+  },
+  {
+   "grip": [
+    0.09,
+    0.55,
+    0.45
+   ],
+   "blade": [
+    0.5,
+    -0.2,
+    0.84
+   ],
+   "hips": {
+    "turn": 20,
+    "drop": 0.13,
+    "shift": [
+     0.03,
+     0.09
+    ]
+   },
+   "torso": {
+    "twist": 25,
+    "lean": 28
+   },
+   "role": "strike",
+   "t": 0.07,
+   "ease": "linear",
+   "feet": {
+    "R": [
+     -0.05,
+     -0.13,
+     -25
+    ]
+   }
+  },
+  {
+   "grip": [
+    0.29,
+    0.36,
+    0.19
+   ],
+   "blade": [
+    0.75,
+    -0.45,
+    -0.45
+   ],
+   "hips": {
+    "turn": 50,
+    "drop": 0.19,
+    "shift": [
+     0.05,
+     0.08
+    ]
+   },
+   "torso": {
+    "twist": 40,
+    "lean": 35
+   },
+   "role": "follow",
+   "t": 0.1,
+   "hold": 0.17,
+   "ease": "out",
+   "feet": {
+    "R": [
+     -0.05,
+     -0.13,
+     -10
+    ]
+   }
+  },
+  {
+   "role": "recover",
+   "t": 0.2,
+   "ease": "inout",
+   "grip": [
+    -0.02,
+    0.5,
+    0.3
+   ],
+   "blade": [
+    0.35,
+    0.55,
+    0.75
+   ],
+   "feet": {
+    "L": [
+     0,
+     0,
+     0
+    ]
+   },
+   "hips": {
+    "turn": 20.0,
+    "drop": 0.076,
+    "shift": [
+     0.02,
+     0.032
+    ]
+   },
+   "torso": {
+    "twist": 16.0,
+    "lean": 14.0,
+    "side": 0.0
+   }
+  },
+  {
+   "role": "ready",
+   "t": 0.2,
+   "ease": "inout",
+   "grip": [
+    -0.17,
+    0.56,
+    0.12
+   ],
+   "blade": [
+    0.1,
+    0.9,
+    0.42
+   ],
+   "hips": {
+    "turn": 0,
+    "drop": 0,
+    "shift": [
+     0,
+     0
+    ]
+   },
+   "torso": {
+    "twist": 0,
+    "lean": 0,
+    "side": 0
+   },
+   "feet": {
+    "R": [
+     0,
+     0,
+     0
+    ]
+   }
+  }
+ ]
+}

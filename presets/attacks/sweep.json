@@ -1,0 +1,233 @@
+{
+ "format": "motionforge-attack",
+ "version": 1,
+ "name": "sweep",
+ "note": "A level slash from the right, across, to the left.",
+ "hand": "R",
+ "fps": 30,
+ "keys": [
+  {
+   "role": "ready",
+   "grip": [
+    -0.17,
+    0.56,
+    0.12
+   ],
+   "blade": [
+    0.1,
+    0.9,
+    0.42
+   ],
+   "off": "free"
+  },
+  {
+   "role": "coil",
+   "t": 0.13,
+   "ease": "inout",
+   "grip": [
+    -0.2085,
+    0.615,
+    -0.0835
+   ],
+   "blade": [
+    -0.225,
+    0.5,
+    -0.205
+   ],
+   "feet": {
+    "R": [
+     -0.06,
+     -0.12,
+     -40
+    ]
+   },
+   "hips": {
+    "turn": -22.5,
+    "drop": 0.03,
+    "shift": [
+     -0.015,
+     -0.01
+    ]
+   },
+   "torso": {
+    "twist": -20.0,
+    "lean": 2.5,
+    "side": 0.0
+   }
+  },
+  {
+   "grip": [
+    -0.24,
+    0.66,
+    -0.25
+   ],
+   "blade": [
+    -0.55,
+    0.1,
+    -0.83
+   ],
+   "hips": {
+    "turn": -45,
+    "drop": 0.06,
+    "shift": [
+     -0.03,
+     -0.02
+    ]
+   },
+   "torso": {
+    "twist": -40,
+    "lean": 5
+   },
+   "role": "windup",
+   "t": 0.14,
+   "hold": 0.07,
+   "ease": "inout",
+   "feet": {
+    "L": [
+     0.04,
+     0.15,
+     10
+    ]
+   }
+  },
+  {
+   "grip": [
+    0.0,
+    0.6,
+    0.43
+   ],
+   "blade": [
+    0.35,
+    0.0,
+    0.94
+   ],
+   "hips": {
+    "turn": 15,
+    "drop": 0.12,
+    "shift": [
+     0.02,
+     0.07
+    ]
+   },
+   "torso": {
+    "twist": 20,
+    "lean": 15
+   },
+   "role": "strike",
+   "t": 0.14,
+   "ease": "in",
+   "feet": {
+    "R": [
+     -0.06,
+     -0.12,
+     -25
+    ]
+   }
+  },
+  {
+   "grip": [
+    0.34,
+    0.59,
+    0.12
+   ],
+   "blade": [
+    0.8,
+    0.05,
+    -0.6
+   ],
+   "hips": {
+    "turn": 55,
+    "drop": 0.13,
+    "shift": [
+     0.05,
+     0.08
+    ]
+   },
+   "torso": {
+    "twist": 45,
+    "lean": 18
+   },
+   "role": "follow",
+   "t": 0.1,
+   "hold": 0.17,
+   "ease": "out",
+   "feet": {
+    "R": [
+     -0.06,
+     -0.12,
+     -10
+    ]
+   }
+  },
+  {
+   "role": "recover",
+   "t": 0.2,
+   "ease": "inout",
+   "grip": [
+    0.05,
+    0.52,
+    0.3
+   ],
+   "blade": [
+    0.45,
+    0.5,
+    0.74
+   ],
+   "feet": {
+    "L": [
+     0,
+     0,
+     0
+    ]
+   },
+   "hips": {
+    "turn": 22.0,
+    "drop": 0.052,
+    "shift": [
+     0.02,
+     0.032
+    ]
+   },
+   "torso": {
+    "twist": 18.0,
+    "lean": 7.2,
+    "side": 0.0
+   }
+  },
+  {
+   "role": "ready",
+   "t": 0.2,
+   "ease": "inout",
+   "grip": [
+    -0.17,
+    0.56,
+    0.12
+   ],
+   "blade": [
+    0.1,
+    0.9,
+    0.42
+   ],
+   "hips": {
+    "turn": 0,
+    "drop": 0,
+    "shift": [
+     0,
+     0
+    ]
+   },
+   "torso": {
+    "twist": 0,
+    "lean": 0,
+    "side": 0
+   },
+   "feet": {
+    "R": [
+     0,
+     0,
+     0
+    ]
+   }
+  }
+ ]
+}

@@ -4,6 +4,7 @@
 //! inference, and GLB rig adapters (standardize, animate, pose test). Zero dependencies; byte-deterministic outputs.
 
 pub mod animate;
+pub mod attack;
 pub mod autopose;
 pub mod clean;
 pub mod clip;

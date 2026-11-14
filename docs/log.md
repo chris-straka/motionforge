@@ -354,3 +354,33 @@ the +-0.02 rad jitter and the even swing keep their known answers.
 
 The round-2 stylized attack_1's zigzag (743 mm peak at frame 8, seen in
 the frames) still counts in full.
+
+## 2026-11-13, round 5: attacks authored from the sword's path
+
+The unreadable attack was settled as the clip's fault (same keys on four
+bodies, two of them professionally rigged, read the same). Method changed:
+`motionforge attack` (`docs/attack.md`) authors an attack from sword keys
+(grip and tip) with the body solved under them every frame.
+
+- **Measured first**: six CC0 pro sword attacks turn the hips 60-120 deg,
+  lean 30-57 deg, drop the hips 0.15-0.2 of the height and stand 0.5-0.95
+  of it wide; the game's attacks did none of that (body change at the
+  game camera 0.29-0.40 against 0.56-0.88).
+- **Result** at the game camera: sweep 0.78, cleave 0.68, backcut 0.65
+  (pros 0.41-0.67, game 0.42-0.49, round 2's key-pose cut 0.52), each with
+  zero skate, sink and float.
+- **Fixed on the way** (each seen in the score first): both feet stepping
+  at once read as floating (steps staggered over two keys); the hips'
+  drop searched in steps made them jitter (now exact); a foot turning
+  about its ankle slid its ball (now pivots on the ball); the wrist limit
+  moved the grip 2 mm off its point unreported (the arm is solved again
+  for the final hand turn, misses are measured, test); the hinge solve
+  landed 6 mm off on the hero (aimed again until on the point); an
+  overhead chop straight down is edge-on to a camera behind him (arc
+  0.47 one-way: replaced by the backhand diagonal).
+- **Parked**: thrust as a camera-readable attack (reason: foreshortened
+  from behind; it would take a side-on lunge or a camera that swings).
+- **Next**: backcut's arm through the chest; back ankle in cleave; body
+  values derived from the sword path when a key leaves them out; the
+  owner's picks to calibrate the score; Kimodo seeds as the rival when f
+  has room.
