@@ -160,6 +160,19 @@ def gltf_node_world(path, name):
     return m
 
 
+def gltf_parent_name(path, name):
+    """The name of a node's parent in the GLB, or None."""
+    import struct
+    b = open(path, "rb").read()
+    n = struct.unpack("<I", b[12:16])[0]
+    nodes = json.loads(b[20:20 + n])["nodes"]
+    idx = next(i for i, nd in enumerate(nodes) if nd.get("name") == name)
+    for nd in nodes:
+        if idx in nd.get("children", []):
+            return nd.get("name")
+    return None
+
+
 def holder_world(arm, socket):
     if socket in arm.pose.bones:
         return arm.matrix_world @ arm.pose.bones[socket].matrix
@@ -176,17 +189,29 @@ def attach_prop(arm, glb, spec, pose):
     bpy.context.view_layer.update()
     if socket not in arm.pose.bones and socket not in bpy.data.objects:
         raise SystemExit(f"no socket {socket} in the rig")
+    # A socket that came in as an empty under a bone is held through that
+    # bone (Blender's importer misplaces an empty under a scaled armature:
+    # a Mixamo rig's 0.01 put the sword 4 m away).
+    hand = gltf_parent_name(glb, socket)
+    via_bone = socket not in arm.pose.bones and hand in arm.pose.bones
     # The socket's glTF frame relative to whatever Blender made of it.
     arm.data.pose_position = 'REST'
     bpy.context.view_layer.update()
-    rest = holder_world(arm, socket)
+    if via_bone:
+        # The bone's rest frame -> the socket's glTF frame, full matrix.
+        rest = arm.matrix_world @ arm.pose.bones[hand].matrix
+    else:
+        rest = holder_world(arm, socket)
     arm.data.pose_position = 'POSE'
     bpy.context.view_layer.update()
     corr = rest.inverted() @ (CONV @ gltf_node_world(glb, socket))
+    keep_offset = via_bone
     # The bone's head is the node's origin: keep only the axes (a root
     # node's offset, such as the game rig's 1 m lift, is not always where
-    # Blender puts it).
-    corr.translation = (0, 0, 0)
+    # Blender puts it). Held through the parent bone, the socket's offset
+    # from it is real and kept.
+    if not keep_offset:
+        corr.translation = (0, 0, 0)
     before = set(bpy.data.objects)
     bpy.ops.import_scene.gltf(filepath=path)
     new = [o for o in bpy.data.objects if o not in before]
@@ -212,16 +237,23 @@ def attach_prop(arm, glb, spec, pose):
         o.parent = None
         o.matrix_parent_inverse = Matrix.Identity(4)
         o.matrix_basis = Matrix.Identity(4)
-        if socket in arm.data.bones:
+        bone = hand if via_bone else (socket if socket in arm.data.bones else None)
+        if bone is not None:
             o.parent = arm
             o.parent_type = 'BONE'
-            o.parent_bone = socket
+            o.parent_bone = bone
             # Bone parenting puts the child at the bone's tail.
-            o.location = (0, -arm.data.bones[socket].length, 0)
+            o.location = (0, -arm.data.bones[bone].length, 0)
         else:
             o.parent = bpy.data.objects[socket]
     for o in meshes:
         o["mf_prop"] = True
+    if SPEC.get("debug"):
+        bpy.context.view_layer.update()
+        for o in meshes:
+            ps = [o.matrix_world @ v.co for v in o.data.vertices]
+            print("PROPDBG", o.name, "parent", o.parent and o.parent.name, o.parent_type,
+                  [round(min(q[i] for q in ps), 3) for i in range(3)], [round(max(q[i] for q in ps), 3) for i in range(3)])
     for o in new:
         if o.type != 'MESH':
             bpy.data.objects.remove(o)
