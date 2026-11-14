@@ -1002,6 +1002,24 @@ pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
     Ok(r)
 }
 
+/// `motionforge socket`: put the hand sockets in the palms (hands with
+/// finger bones), where mocap sword clips hold the handle.
+pub fn cmd_socket(cmd: &Cmd) -> CmdResult {
+    let input = cmd.required("input")?;
+    let output = cmd.required("output")?;
+    let mut doc = load(input)?;
+    let placed = motion_core::attack::grip::place_sockets(&mut doc).map_err(|e| (3, e))?;
+    if placed.is_empty() {
+        return Err((3, "no hand has finger bones: nothing placed".into()));
+    }
+    save(&doc, output)?;
+    Ok(format!(
+        "=== motionforge socket ===\nplaced in the palm: {}\noutput: {}\n",
+        placed.join(", "),
+        output
+    ))
+}
+
 /// `motionforge attack`: a sword attack authored from the sword's path
 /// (`motion_core::attack`), solved onto a rigged GLB as a clip.
 pub fn cmd_attack(cmd: &Cmd) -> CmdResult {

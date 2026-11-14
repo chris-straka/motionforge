@@ -38,6 +38,7 @@ commands:\n\
   standardize    rig GLB -> standard humanoid skeleton (DEF-* names, canonical parents)\n\
   animate        retarget clip GLBs onto a rigged GLB (+ contact pass)\n\
   motion check   score each clip of a rigged GLB: foot skate, ground, limbs in the body, jerk, attack timing\n\
+  socket         put the hand sockets in the palms (where mocap sword clips hold the handle)\n\
   attack         a sword attack authored from the sword's path (grip and tip keys), solved onto a rig\n\
   clean          fix a rigged GLB's own clips: floor offset, feet under the floor, sliding plants, arms in the body\n\
   grip           find a weapon clip set's grip, write it into the hand socket\n\
@@ -729,6 +730,7 @@ fn real_main(argv: &[String]) -> (i32, Option<String>) {
             "motion-check" => glb_cmds::cmd_motion_check(&args),
             "clean" => glb_cmds::cmd_clean(&args),
             "attack" => glb_cmds::cmd_attack(&args),
+            "socket" => glb_cmds::cmd_socket(&args),
             "grip" => glb_cmds::cmd_grip(&args),
             "keypose" => keypose_cmd::cmd_keypose(&args),
             "pose-test" => glb_cmds::cmd_pose_test(&args),

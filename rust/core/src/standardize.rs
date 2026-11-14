@@ -444,6 +444,15 @@ fn humanoid_standardize(doc: &Document, rig: &Rig) -> Result<Outcome, String> {
     report.helpers = inserted.bones;
     // Weapon sockets on the hands (attachment nodes, not joints).
     report.sockets = crate::contact::insert_sockets(&mut out)?;
+    // On hands with finger bones the socket goes in the palm, where a
+    // mocap fist holds the handle (`attack::grip::place_sockets`).
+    if let Ok(placed) = crate::attack::grip::place_sockets(&mut out) {
+        for p in placed {
+            if !report.sockets.contains(&p) {
+                report.sockets.push(p);
+            }
+        }
+    }
     // The dropped animations' data leaves the file.
     out.compact();
     Ok(Outcome::Done(out, report))

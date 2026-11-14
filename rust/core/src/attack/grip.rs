@@ -21,8 +21,11 @@
 //! +Y along the blade, +X the leading edge toward the knuckles), so a
 //! sword parented to the socket with no further offset sits in the hand.
 
+use crate::glb::Document;
+use crate::json::Json;
 use crate::keypose::fit::RigInfo;
 use crate::math::{Mat3, Quat, Vec3};
+use crate::readcam::HEAD_SHARE;
 use crate::rig::Trs;
 
 /// Handle and finger half-thickness, metres on a 2 m hero.
@@ -109,6 +112,54 @@ pub fn palm_hold(info: &RigInfo, s: usize, unit: f64) -> Option<PalmHold> {
         grip: inv.rotate_vec(centre - hw.t),
         socket: inv.mul(world).normalized(),
     })
+}
+
+/// Put each hand's `Socket_Hand_<side>` in its palm (`palm_hold`: the
+/// grip's middle, +Y along the blade a fist holds, +X its leading edge),
+/// adding the socket when missing. Hands without finger bones are left as
+/// they are. Mocap sword clips (Mixamo's) are made for a fist round a
+/// handle there: a socket elsewhere points the blade where the clip did
+/// not mean it (the game's Quirin clips held the blade along the forearm).
+/// Returns the sockets placed.
+pub fn place_sockets(doc: &mut Document) -> Result<Vec<String>, String> {
+    let info = RigInfo::new(doc)?;
+    let rig = &info.rig;
+    let head = info.head.ok_or("rig has no head joint")?;
+    let h = (rig.head(head).y - info.ground) / HEAD_SHARE;
+    let unit = h / 2.0;
+    let mut placed = Vec::new();
+    for (s, side) in ["L", "R"].iter().enumerate() {
+        let Some(ph) = palm_hold(&info, s, unit) else {
+            continue;
+        };
+        let hand = info.hand[s];
+        let hw = rig.rest_world[hand];
+        let world = hw.t + hw.rotation().rotate_vec(ph.grip);
+        let inv = hw.inverse().ok_or("hand transform is singular")?;
+        let (_, _, hs) = hw.decompose();
+        let inv_s = Vec3::new(1.0 / hs.x, 1.0 / hs.y, 1.0 / hs.z);
+        let name = format!("Socket_Hand_{side}");
+        let node_index = match info.socket[s] {
+            Some(n) => n,
+            None => {
+                let nodes = doc.array_mut("nodes");
+                nodes.push(Json::obj(vec![("name", Json::str(&name))]));
+                let sn = nodes.len() - 1;
+                let mut kids = nodes[hand]
+                    .get("children")
+                    .and_then(Json::as_arr)
+                    .map(|k| k.to_vec())
+                    .unwrap_or_default();
+                kids.push(Json::num(sn as f64));
+                nodes[hand].set("children", Json::Arr(kids));
+                sn
+            }
+        };
+        let node = &mut doc.array_mut("nodes")[node_index];
+        crate::glb::set_node_trs(node, inv.apply(world), ph.socket, inv_s);
+        placed.push(name);
+    }
+    Ok(placed)
 }
 
 fn line_dist(p: Vec3, on: Vec3, dir: Vec3) -> f64 {
