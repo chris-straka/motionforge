@@ -218,9 +218,7 @@ struct Cap {
     /// hand or foot (its children; the toe). The cap is then on the bend
     /// between the parent bone and the hand or foot, against the same bend
     /// at rest, read from joint positions alone. A rotation from the rest
-    /// pose also counts the forearm's twist and each rig's own rest pose:
-    /// the same idle read 13 deg on the pros' mannequin and 75 on a rig
-    /// that rests with its palms turned.
+    /// pose also counts the forearm's twist, which is not the wrist's.
     tip: Vec<usize>,
 }
 
