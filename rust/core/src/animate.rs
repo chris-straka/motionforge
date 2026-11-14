@@ -168,6 +168,33 @@ fn rest_alignment(src: &Mapped, tgt: &Mapped, name: &str, yaw: Quat) -> Quat {
         }
         return shortest_arc(dt.normalized(), ds.normalized());
     }
+    // A hand whose fingers the two rigs do not share by name (a mitten
+    // hand, one finger bone, sockets only): toward the middle of each
+    // rig's own hand children, else as its forearm. Left unaligned, the
+    // hand kept the source's rest direction on a rig that rests otherwise:
+    // every clip made on a T-pose rig bent an A-pose rig's wrists by the
+    // difference (70 deg on the pro bench's hero rig).
+    if let Some(side) = name.strip_prefix("DEF-hand.") {
+        let tip = |m: &Mapped, node: usize| -> Option<Vec3> {
+            let kids: Vec<Vec3> = m.rig.children[node]
+                .iter()
+                .map(|&c| m.rig.head(c) - m.rig.head(node))
+                .filter(|d| d.length() > 1e-9)
+                .collect();
+            if kids.is_empty() {
+                return None;
+            }
+            let mean = kids
+                .iter()
+                .fold(Vec3::ZERO, |a, d| a + *d)
+                .scale(1.0 / kids.len() as f64);
+            (mean.length() > 1e-9).then(|| mean.normalized())
+        };
+        return match (tip(tgt, ts), tip(src, ss)) {
+            (Some(dt), Some(ds)) => shortest_arc(dt, yaw.rotate_vec(ds).normalized()),
+            _ => rest_alignment(src, tgt, &format!("DEF-forearm.{side}"), yaw),
+        };
+    }
     Quat::IDENTITY
 }
 

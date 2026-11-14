@@ -883,7 +883,7 @@ fn read_at_camera(
 /// `motionforge motion check <glb>`: score every clip of a rigged GLB
 /// (`motion_core::motioncheck`; `docs/motion-check.md`).
 pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
-    use motion_core::motioncheck::{check_doc, ATTACK_WORDS};
+    use motion_core::motioncheck::ATTACK_WORDS;
     let input = cmd.required("input")?;
     let doc = load(input)?;
     let opts = contact_opts(cmd)?.unwrap_or_default();
@@ -912,7 +912,15 @@ pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
         }
         None => None,
     };
-    let (subject, mut scores) = check_doc(&doc, &opts, &only, &words, fps).map_err(|e| (3, e))?;
+    let (subject, mut scores) = motion_core::motioncheck::check_doc_with(
+        &doc,
+        &opts,
+        &only,
+        &words,
+        fps,
+        cmd.flag("no-through"),
+    )
+    .map_err(|e| (3, e))?;
     if let Some(cam) = cmd.get("camera") {
         read_at_camera(cmd, cam, &doc, &subject, &mut scores, fps)?;
     }
@@ -921,13 +929,27 @@ pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
             return Err((2, format!("no clip named '{}'", o)));
         }
     }
-    if cmd.flag("json") {
+    let frames = cmd.flag("tracks");
+    if cmd.flag("json") || frames {
         let j = Json::obj(vec![
             ("height_m", Json::num(round(subject.height, 4))),
             ("scale_k", Json::num(round(subject.k, 4))),
             (
                 "clips",
-                Json::Arr(scores.iter().map(|s| s.to_json()).collect()),
+                Json::Arr(
+                    scores
+                        .iter()
+                        .map(|s| {
+                            let mut j = s.to_json();
+                            if frames {
+                                if let Json::Obj(f) = &mut j {
+                                    f.push(("detail".into(), s.detail_json(subject.k)));
+                                }
+                            }
+                            j
+                        })
+                        .collect(),
+                ),
             ),
         ]);
         return pretty(&j);

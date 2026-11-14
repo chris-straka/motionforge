@@ -441,19 +441,39 @@ fn joint_limits_catch_backward_knees_and_elbows_only() {
     let l = bend("DEF-thigh.L", "DEF-shin.L", "DEF-foot.L", -1.0, -40.0);
     assert_eq!(l.worst, "knee.L straighter than straight", "{l:?}");
     assert!((l.worst_deg - 30.0).abs() < 0.5, "{l:?}");
-    // A wrist turned 100 degrees: 10 past.
+    // A wrist bent 100 degrees further than at rest (the hand turned in
+    // the plane of the forearm and the hand's own direction): 10 past.
+    // Twisted 100 degrees about the forearm instead (the forearm's own
+    // turn): the bend is as at rest, nothing past.
     let hand = rig.find("DEF-hand.R").unwrap();
+    let fore = rig.find("DEF-forearm.R").unwrap();
+    let kids: Vec<Vec3> = rig.children[hand].iter().map(|&c| rig.head(c)).collect();
+    let tip = kids
+        .iter()
+        .fold(Vec3::ZERO, |a, k| a + *k)
+        .scale(1.0 / kids.len() as f64);
+    let along = (rig.head(hand) - rig.head(fore)).normalized();
+    let across = along.cross(tip - rig.head(hand)).normalized();
     let mut frames = still(rig, n);
     for fr in frames.iter_mut() {
         fr[hand] = Some(turned(
             rig,
             hand,
-            Quat::from_axis_angle(fwd, 100f64.to_radians()),
+            Quat::from_axis_angle(across, 100f64.to_radians()),
         ));
     }
     let l = score(&s, "idle", &times(n), &frames, false).limits;
     assert_eq!(l.worst, "wrist.R turned too far");
     assert!((l.worst_deg - 10.0).abs() < 1e-6, "{l:?}");
+    for fr in frames.iter_mut() {
+        fr[hand] = Some(turned(
+            rig,
+            hand,
+            Quat::from_axis_angle(along, 100f64.to_radians()),
+        ));
+    }
+    let l = score(&s, "idle", &times(n), &frames, false).limits;
+    assert_eq!(l.frames, 0, "{l:?}");
 }
 
 #[test]
@@ -547,4 +567,164 @@ fn arm_ik_keeps_the_elbow_a_hinge() {
             .rotate_vec(rig.rest_world[up].rotation().conj().rotate_vec(axis));
         assert!(b.normalized().dot(hinge).abs() < 1e-9 + a.normalized().dot(hinge).abs());
     }
+}
+
+#[test]
+fn a_fast_stop_is_not_back_and_forth() {
+    // The forearm swings faster and faster for 6 frames, then stops dead:
+    // a punch's speed peak. Its acceleration turns back once; a zigzag
+    // turns back twice running. The pros' strikes scored 100-950 mm when
+    // one turn counted.
+    let s = subject();
+    let rig = &s.rig;
+    let fore = rig.find("DEF-forearm.R").unwrap();
+    let hand = rig.find("DEF-hand.R").unwrap();
+    let fwd = motion_core::animate::forward(rig, &s.map);
+    let axis = (rig.head(hand) - rig.head(fore)).cross(fwd).normalized();
+    let n = 20;
+    let mut frames = still(rig, n);
+    for (f, fr) in frames.iter_mut().enumerate() {
+        let g = (f.clamp(5, 11) - 5) as f64;
+        fr[fore] = Some(turned(rig, fore, Quat::from_axis_angle(axis, 0.02 * g * g)));
+    }
+    let c = score(&s, "idle", &times(n), &frames, false);
+    let arm = c.rough.iter().find(|r| r.chain == "arm.R").unwrap();
+    assert!(arm.peak_mm < 1e-6, "{arm:?}");
+    // The same stop overshot and pulled back every frame (+-0.02 rad for
+    // 4 frames) is a zigzag again.
+    for (f, fr) in frames.iter_mut().enumerate().skip(12).take(4) {
+        let sign = if f % 2 == 0 { 1.0 } else { -1.0 };
+        fr[fore] = Some(turned(
+            rig,
+            fore,
+            Quat::from_axis_angle(axis, 0.72 + sign * 0.02),
+        ));
+    }
+    let c = score(&s, "idle", &times(n), &frames, false);
+    let arm = c.rough.iter().find(|r| r.chain == "arm.R").unwrap();
+    assert!(arm.peak_mm > 10.0, "{arm:?}");
+}
+
+#[test]
+fn a_body_lying_on_the_floor_does_not_float() {
+    // Tipped 90 degrees forward about the hips and lowered until the mesh
+    // is 1 cm off the floor: the feet are far up, the body is not
+    // floating. 20 cm higher it is.
+    let s = subject();
+    let rig = &s.rig;
+    let body = s.body.as_ref().unwrap();
+    let hips = rig.find("DEF-spine").unwrap();
+    let fwd = motion_core::animate::forward(rig, &s.map);
+    let lat = Vec3::new(0.0, 1.0, 0.0).cross(fwd).normalized();
+    // Face down (the front turned to the floor), knees bent 90 degrees so
+    // the feet point up.
+    let mut tip = Quat::from_axis_angle(lat, std::f64::consts::FRAC_PI_2);
+    if tip.rotate_vec(fwd).y > 0.0 {
+        tip = Quat::from_axis_angle(lat, -std::f64::consts::FRAC_PI_2);
+    }
+    let mut knee = Quat::from_axis_angle(lat, std::f64::consts::FRAC_PI_2);
+    if knee.rotate_vec(Vec3::new(0.0, -1.0, 0.0)).dot(fwd) > 0.0 {
+        knee = Quat::from_axis_angle(lat, -std::f64::consts::FRAC_PI_2);
+    }
+    let lying = |dy: f64| {
+        let mut fr = vec![None; rig.names.len()];
+        for side in ["L", "R"] {
+            let sh = rig.find(&format!("DEF-shin.{side}")).unwrap();
+            fr[sh] = Some(turned(rig, sh, knee));
+        }
+        let mut t = match rig.parent[hips] {
+            Some(_) => turned(rig, hips, tip),
+            None => {
+                let mut t = rig.rest[hips];
+                t.r = tip.mul(t.r).normalized();
+                t
+            }
+        };
+        fr[hips] = Some(t);
+        let low = body.lowest(&rig.world(&fr)) - body.floor;
+        let up = Vec3::new(0.0, 0.01 + dy - low, 0.0);
+        let shift = match rig.parent[hips] {
+            Some(p) => rig.rest_world[p].inverse().unwrap().apply_linear(up),
+            None => up,
+        };
+        t.t = t.t + shift;
+        fr[hips] = Some(t);
+        vec![fr; 6]
+    };
+    let c = score(&s, "death", &times(6), &lying(0.0), false);
+    assert!(
+        c.detail.lowest.iter().all(|h| *h > 0.05 * s.k),
+        "feet {:?}",
+        c.detail.lowest
+    );
+    assert_eq!(c.feet.float_frames, 0, "{:?}", c.feet);
+    let c = score(&s, "death", &times(6), &lying(0.2), false);
+    assert_eq!(c.feet.float_frames, 6);
+    assert!((c.feet.float_m * s.k - 0.21).abs() < 1e-3, "{:?}", c.feet);
+}
+
+#[test]
+fn an_elbow_out_of_its_plane_is_not_a_limit_a_knee_is() {
+    // Bent 60 degrees about the facing, out of the hinge plane. An elbow
+    // gets there by the upper arm's twist, which joint positions do not
+    // show (the pros do it all the time); a knee cannot.
+    let s = subject();
+    let rig = &s.rig;
+    let fwd = motion_core::animate::forward(rig, &s.map);
+    let n = 4;
+    let side = |lower: &str| {
+        let b = rig.find(lower).unwrap();
+        let mut frames = still(rig, n);
+        for fr in frames.iter_mut() {
+            fr[b] = Some(turned(
+                rig,
+                b,
+                Quat::from_axis_angle(fwd, 60f64.to_radians()),
+            ));
+        }
+        score(&s, "idle", &times(n), &frames, false).limits
+    };
+    let l = side("DEF-forearm.R");
+    assert_eq!(l.frames, 0, "{l:?}");
+    let l = side("DEF-shin.L");
+    assert_eq!(l.worst, "knee.L bent sideways", "{l:?}");
+    assert!((l.worst_deg - 35.0).abs() < 0.5, "{l:?}");
+}
+
+#[test]
+fn a_knee_bends_with_its_foot_whatever_the_thigh_twist() {
+    // The thigh rolled 40 degrees about its own length (the hip's twist,
+    // which the joints do not show), then the knee bent 90 degrees back
+    // across the body's left-right axis, the foot carried along: the
+    // joints are exactly a natural bend. A hinge carried by the thigh read
+    // that as 40 degrees sideways (15 past); the foot's is right.
+    let s = subject();
+    let rig = &s.rig;
+    let fwd = motion_core::animate::forward(rig, &s.map);
+    let lat = Vec3::new(0.0, 1.0, 0.0).cross(fwd).normalized();
+    let (th, sh) = (
+        rig.find("DEF-thigh.L").unwrap(),
+        rig.find("DEF-shin.L").unwrap(),
+    );
+    let along = (rig.head(sh) - rig.head(th)).normalized();
+    let roll = Quat::from_axis_angle(along, 40f64.to_radians());
+    let mut bend = Quat::from_axis_angle(lat, std::f64::consts::FRAC_PI_2);
+    if bend.rotate_vec(Vec3::new(0.0, -1.0, 0.0)).dot(fwd) > 0.0 {
+        bend = Quat::from_axis_angle(lat, -std::f64::consts::FRAC_PI_2);
+    }
+    let n = 4;
+    let mut frames = still(rig, n);
+    for fr in frames.iter_mut() {
+        fr[th] = Some(turned(rig, th, roll));
+        let mut t = rig.rest[sh];
+        t.r = roll
+            .mul(rest_rot(rig, th))
+            .conj()
+            .mul(bend)
+            .mul(rest_rot(rig, sh))
+            .normalized();
+        fr[sh] = Some(t);
+    }
+    let l = score(&s, "idle", &times(n), &frames, false).limits;
+    assert!(!l.joints.iter().any(|j| j.starts_with("knee")), "{l:?}");
 }

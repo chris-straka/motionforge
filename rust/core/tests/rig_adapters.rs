@@ -416,6 +416,60 @@ fn retarget_aligns_rest_poses() {
     assert!(worst < 0.05, "bone directions differ by {} deg", worst);
 }
 
+/// The same on a target whose fingers the source does not share by name
+/// (one mitten bone under the hand): the hand still lines up with the
+/// source's. It kept the source's rest direction before, 45 degrees off
+/// here (70 on the pro bench's hero rig, an A-pose with one finger bone,
+/// under clips made on a T-pose).
+#[test]
+fn retarget_aligns_a_hand_without_shared_fingers() {
+    use motion_core::fixture::humanoid_posed;
+    let src = humanoid_posed(Naming::Mixamo, false, true, 45.0).unwrap();
+    let body = humanoid(Naming::Plain, false, false).unwrap();
+    let (mut target, _) = done(standardize(&body, "humanoid").unwrap());
+    let mut renamed = 0;
+    for node in target.json.get_mut("nodes").unwrap().as_arr_mut().unwrap() {
+        let name = node.get("name").and_then(Json::as_str).unwrap_or("");
+        // The finger keeps its own name or the standard one, whichever
+        // standardize gave it; either way it becomes a mitten nobody maps.
+        let side = name
+            .strip_prefix("DEF-f_middle.01.")
+            .or_else(|| name.strip_prefix("Finger2_"));
+        if let Some(side) = side {
+            let new = format!("Mitten_{side}");
+            node.set("name", Json::str(&new));
+            renamed += 1;
+        }
+    }
+    assert_eq!(renamed, 2);
+    let target = Document::parse(&target.to_bytes().unwrap()).unwrap();
+    let (animated, _) =
+        retarget_clips(&target, &[("apose-walk".into(), src.clone())], 30.0).unwrap();
+    let s = Mapped::new(&src).unwrap();
+    let t = Mapped::new(&animated).unwrap();
+    assert!(t.map.node_of("DEF-f_middle.01.R").is_none());
+    let sa = &Animation::load_all(&src).unwrap()[0];
+    let ta = &Animation::load_all(&animated).unwrap()[0];
+    let mut worst: f64 = 0.0;
+    for f in [0, 7, 15, 22, 30] {
+        let time = f as f64 / 30.0;
+        let sw = s.rig.world(&sa.sample(&s.rig, time));
+        let tw = t.rig.world(&ta.sample(&t.rig, time));
+        for side in ["L", "R"] {
+            let sh = s.map.node_of(&format!("DEF-hand.{side}")).unwrap();
+            let sm = s.map.node_of(&format!("DEF-f_middle.01.{side}")).unwrap();
+            let th = t.map.node_of(&format!("DEF-hand.{side}")).unwrap();
+            let tm = t.rig.find(&format!("Mitten_{side}")).unwrap();
+            let cos = (sw[sm].t - sw[sh].t)
+                .normalized()
+                .dot((tw[tm].t - tw[th].t).normalized())
+                .clamp(-1.0, 1.0);
+            worst = worst.max(cos.acos().to_degrees());
+        }
+    }
+    assert!(worst < 10.0, "hand directions differ by {} deg", worst);
+}
+
 /// Rotation of `node` relative to its parent, as a change from rest.
 fn local_delta(rig: &Rig, world: &[Affine], node: usize) -> motion_core::math::Quat {
     let p = rig.parent[node].unwrap();
