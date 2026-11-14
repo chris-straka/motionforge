@@ -201,3 +201,44 @@ spikes (quirin-attack_2 652 mm at frame 14, attack_1 284 at 6: the
 hold-to-strike corner of the time warp), then `--stylize auto`: stylize a
 clip only where its defects stay within the original's and its windup or
 hold grows, and report per clip which won.
+
+## 2026-11-13, pro bench: correctness against professional clips
+
+`docs/pro-bench.md`. The 84 Quaternius UAL1+2 clips (CC0) on their own
+mannequin, then through `animate`, `clean`, `clean --contact` and
+`stylize` onto the hero rig and Quaternius' female mannequin, each stage
+compared with the pro clip frame by frame.
+
+### Kept
+
+- **Back-and-forth needs a zigzag** (the acceleration turning back twice
+  running). One turn is the speed peak of any fast move: pro clips
+  flagged 53 -> 23.
+- **Floating needs the whole body off the floor** (lowest skinned
+  vertex), not both feet: lying and rolling frames no longer float.
+- **No elbow sideways limit; knees, wrists and ankles from joint
+  positions.** Pro clips past a limit 58 -> 40 with the first two; the
+  position-based ones make a clip and its retarget read the same on rigs
+  that rest differently.
+- **Hand rest alignment without shared finger names** (`animate`): the
+  hero's wrists were bent 62-70 deg off the pro's on every clip made on a
+  T-pose rig; 5-8 after.
+- `motion check --tracks` and `--no-through`; `pro_bench.py` (calibrate,
+  run, rescore, why).
+
+### Dropped
+
+- Contact points on the sole instead of the joints: the pros pivot the
+  foot on the joints (Walk_Loop 5.4 -> 13.9 cm).
+- Sink measured on the mesh: the pros' heel slap sweeps the heel 2.5 cm
+  into the floor (sink clips 18 -> 24).
+- A knee hinge following the foot's direction across the thigh: flips
+  when the toes point (knee "straighter than straight" on 45 pro clips).
+- Key-pose distance as the timing check: speed minima on loops and idles
+  moved up to 25 frames for nothing; the speed curve's shift replaced it.
+
+### First numbers (before the hand fix; hero rig, clips passing of 84)
+
+raw 6, retarget 21, clean 35, clean --contact 35, stylize 0 of 5. `clean`
+removes every sink the retarget leaves (44 clips) and all skate; it is
+worse on Crouch_Fwd_Loop, Slide_Exit, Sword_Regular_B and Jump_Start.
