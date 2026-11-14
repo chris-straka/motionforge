@@ -6,7 +6,10 @@
 SPEC = {
   "out": "dir/prefix",               # frames: <out>.r<row>.<i:04d>.png
   "size": [960, 540],
-  "cam": "game" | "lock" | "close",  # see CAMERA below
+  "cam": "game" | "lock" | "close" | "hand" | "gamefit",  # see CAMERA
+                                     # below ("hand": close on the sword hand;
+                                     # "gamefit": the game camera's angle,
+                                     # moved in so the move fills the frame)
   "yaw_deg": 0,                      # game/lock: orbit round him (0 = behind)
   "engine": "eevee" | "workbench",
   "prop": "sword.glb@Socket_Hand_R", # optional: a model held at a socket
@@ -217,6 +220,8 @@ def attach_prop(arm, glb, spec, pose):
             o.location = (0, -arm.data.bones[socket].length, 0)
         else:
             o.parent = bpy.data.objects[socket]
+    for o in meshes:
+        o["mf_prop"] = True
     for o in new:
         if o.type != 'MESH':
             bpy.data.objects.remove(o)
@@ -239,8 +244,12 @@ def facing(arm):
 
 def clip_points(arm, meshes, f0, f1):
     """Corners of every mesh's posed bounding box, over the clip (every
-    other frame)."""
+    other frame). A held prop does not count when the body is there: the
+    frame is fitted to the figure, and the blade may leave it at full
+    stretch."""
     scn = bpy.context.scene
+    body = [o for o in meshes if not o.get("mf_prop")]
+    meshes = body or meshes
     pts = []
     for f in range(f0, f1 + 1, 2):
         scn.frame_set(f)
@@ -259,6 +268,27 @@ def clip_points(arm, meshes, f0, f1):
             print("BOUNDS", o.name, [round(min(p[i] for p in ps), 3) for i in range(3)],
                   [round(max(p[i] for p in ps), 3) for i in range(3)])
     return pts
+
+
+def fit_view(arm, meshes, f0, f1, view, up, fov):
+    """Eye and look point along `view` that fit the figure over the clip
+    (the move's projected extents, not a sphere round it) to about 80%
+    of the frame's height; the blade may reach past the sides at full
+    stretch."""
+    pts = clip_points(arm, meshes, f0, f1) + [Vector((q.x, q.y, 0.0)) for q in clip_points(arm, meshes, f0, f0)]
+    cr = view.cross(up).normalized()
+    cu = cr.cross(view).normalized()
+    c0 = sum(pts, Vector()) / len(pts)
+    xs = [(q - c0).dot(cr) for q in pts]
+    ys = [(q - c0).dot(cu) for q in pts]
+    zs = [(q - c0).dot(view) for q in pts]
+    tan_v = math.tan(fov / 2)
+    tan_h = tan_v * W / H
+    mid = c0 + cr * ((min(xs) + max(xs)) / 2) + cu * ((min(ys) + max(ys)) / 2)
+    half_x = (max(xs) - min(xs)) / 2 * 1.15
+    half_y = (max(ys) - min(ys)) / 2 * 1.25
+    dist = max(half_x / tan_h, half_y / tan_v) + max(zs)
+    return mid, mid + view * dist
 
 
 def place_camera(arm, meshes, f0, f1):
@@ -289,6 +319,42 @@ def place_camera(arm, meshes, f0, f1):
         eye = focus + side + lift + back * (d * math.cos(p)) + up * (d * math.sin(p))
         look = focus + side * 0.6
         cam.data.angle_y = math.radians(GAME_FOV_DEG)
+    elif kind == "gamefit":
+        # The game camera's direction and pitch, moved in until the move
+        # fills the frame (tall frames for a phone).
+        yaw = math.radians(SPEC.get("yaw_deg", 0.0))
+        look_dir = fwd * math.cos(yaw) + right * math.sin(yaw)
+        p = -GAME_PITCH
+        view = (-look_dir * math.cos(p) + up * math.sin(p)).normalized()
+        fov = math.radians(30)
+        look, eye = fit_view(arm, meshes, f0, f1, view, up, fov)
+        cam.data.angle_y = fov
+    elif kind == "hand":
+        # Close on the sword hand, from his front right and a little above,
+        # riding with the hand (not turning with it): for judging the grip.
+        bone = SPEC.get("hand_bone", "DEF-hand.R")
+        u = 1.0 / stature_unit(arm)
+        rider = bpy.data.objects.new("rider", None)
+        scn.collection.objects.link(rider)
+        c = rider.constraints.new('COPY_LOCATION')
+        c.target = arm
+        c.subtarget = bone
+        cam.parent = rider
+        view = (fwd * 0.75 + right * 0.45 + up * 0.5).normalized()
+        cam.location = view * (0.62 * u)
+        cam.rotation_euler = (-view).to_track_quat('-Z', 'Y').to_euler()
+        cam.data.angle_y = math.radians(40)
+        cam.data.clip_start = 0.005 * u
+        scn.camera = cam
+        return cam, fwd, -view
+    elif SPEC.get("fit", "sphere") == "tight":
+        a = math.radians(30)
+        d = (fwd * math.cos(a) + right * math.sin(a)).normalized()
+        el = math.radians(10)
+        view = (d * math.cos(el) + up * math.sin(el)).normalized()
+        fov = math.radians(CLOSE_FOV_DEG)
+        look, eye = fit_view(arm, meshes, f0, f1, view, up, fov)
+        cam.data.angle_y = fov
     else:
         a = math.radians(30)
         d = (fwd * math.cos(a) + right * math.sin(a)).normalized()
@@ -298,7 +364,7 @@ def place_camera(arm, meshes, f0, f1):
         lo = Vector((min(p.x for p in pts), min(p.y for p in pts), 0.0))
         hi = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
         c = (lo + hi) / 2
-        rad = max((p - c).length for p in pts) * 1.05
+        rad = max((p - c).length for p in pts) * 1.02
         half = math.radians(CLOSE_FOV_DEG) / 2
         # Fit the clip's bounding sphere in the narrower of the two angles.
         half_w = math.atan(math.tan(half) * W / H)

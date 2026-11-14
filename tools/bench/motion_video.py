@@ -86,7 +86,7 @@ def main():
     out = sys.argv[1]
     rest = sys.argv[2:]
     opts = {"cam": "game", "yaw": "0", "prop": None, "prop-pose": "socket", "engine": "eevee",
-            "size": "960x540", "loops": "2", "slow": "0.5", "marks": None, "cols": "3", "only": None}
+            "size": "960x540", "loops": "2", "slow": "0.5", "marks": None, "cols": "3", "only": None, "fit": "sphere"}
     rows = []
     i = 0
     while i < len(rest):
@@ -105,7 +105,7 @@ def main():
             r["marks"] = mk.get(r["clip"], {})
     tmp = tempfile.mkdtemp(prefix="mvideo")
     spec = {"out": os.path.join(tmp, "t"), "size": [w, h], "cam": opts["cam"],
-            "yaw_deg": float(opts["yaw"]), "engine": opts["engine"],
+            "yaw_deg": float(opts["yaw"]), "engine": opts["engine"], "fit": opts["fit"],
             "prop": None, "prop_pose": opts["prop-pose"], "rows": rows,
             "only": [int(x) for x in opts["only"].split(",")] if opts["only"] else None}
     if opts["prop"]:
