@@ -530,3 +530,20 @@ Andras and scored as in round 7.
   doesn't know a sword is in the hand. `motionforge attack --preset
   thrust`: blade 0.99 ahead at 0.40 m reach, feet 3.8 cm, nothing
   through the body.
+
+## 2026-11-14, round 9: twelve more Mixamo clips, the thrust, a sword set
+
+Twelve Mixamo clips (exported on the peasant girl: 65 joints plus eyes and
+ribbons, which the mapper leaves alone) copied onto the starred Andras:
+body 0.00002 deg from every source, the sword 8.2-8.4 deg off the source
+hand (21.5 on the lead-hand knife stab).
+
+- **A mocap thrust:** Thrust Slash's first 34 frames point the blade 0.92
+  ahead at 0.38 m reach, the point following the hilt's drive (0.97),
+  feet 9.4 cm, nothing through the body. The authored thrust: 0.99, 0.40
+  m. Mocap first: Thrust Slash replaces it.
+- The torch stab holds its torch upright (118 deg from a thrust, no
+  fixed wrist offset fixes that); the rear-hand knife stab would pass
+  with a 32 deg wrist offset (0.85 ahead as it is).
+- Two are clips we had: Stable Sword Inward Slash is Inward Slashing,
+  Sword And Shield High Attack is High Attack.
