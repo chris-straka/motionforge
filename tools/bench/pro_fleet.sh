@@ -29,7 +29,9 @@ fi
 W=$FB/pro/$TAG
 mkdir -p "$W"
 nice -n 10 python3 tools/bench/pro_bench.py calibrate --out "$W/cal" > "$W.cal.log"
-nice -n 10 python3 tools/bench/pro_bench.py run --target "$NAME=$RIG" --mannequin-f \
+MF=--mannequin-f
+[ "${MANNEQUIN_F:-1}" = 1 ] || MF=
+nice -n 10 python3 tools/bench/pro_bench.py run --target "$NAME=$RIG" $MF \
   --jobs "${JOBS:-3}" --out "$W/run"
 cp "$W/cal/calib.md" "$W/cal/calib.json" "$W/run/results.json" "$W/run/report.md" "$OUT/"
 echo "stage GLBs: $W/run"

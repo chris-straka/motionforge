@@ -805,7 +805,7 @@ pub fn adapter_main(argv: &[String]) -> i32 {
 /// `motionforge motion check <glb>`: score every clip of a rigged GLB
 /// (`motion_core::motioncheck`; `docs/motion-check.md`).
 pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
-    use motion_core::motioncheck::{check_doc, ATTACK_WORDS};
+    use motion_core::motioncheck::ATTACK_WORDS;
     let input = cmd.required("input")?;
     let doc = load(input)?;
     let opts = contact_opts(cmd)?.unwrap_or_default();
@@ -834,7 +834,15 @@ pub fn cmd_motion_check(cmd: &Cmd) -> CmdResult {
         }
         None => None,
     };
-    let (subject, scores) = check_doc(&doc, &opts, &only, &words, fps).map_err(|e| (3, e))?;
+    let (subject, scores) = motion_core::motioncheck::check_doc_with(
+        &doc,
+        &opts,
+        &only,
+        &words,
+        fps,
+        cmd.flag("no-through"),
+    )
+    .map_err(|e| (3, e))?;
     for o in &only {
         if !scores.iter().any(|s| &s.name == o) {
             return Err((2, format!("no clip named '{}'", o)));

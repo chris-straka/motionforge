@@ -6,7 +6,8 @@ motionforge CLI).
     pro_bench.py run --target andras=RIG.glb [--target name=RIG.glb ...]
                      [--libs ual1,ual2] [--clips a,b] [--stages ...] [--out DIR]
                      [--jobs N]
-    pro_bench.py report DIR
+    pro_bench.py report DIR | recompare DIR | why DIR TARGET STAGE
+    pro_bench.py rescore DIR [--target NAME]   (GLBs as they are, through-body kept)
 
 Source: Quaternius Universal Animation Library 1 and 2 [Standard], root
 motion GLBs (CC0; benchmark use only, never training). Fetch them with
@@ -42,8 +43,10 @@ Checks per clip and stage (lengths on a 1.75 m body):
   limits   frames where a joint is 5+ deg further past a limit than the pro's
            same joint: under 5% of the clip
   rough    back-and-forth (worst chain mean) no more than the pro's + 0.5 mm
-  keys     key poses (the body's speed minima) within 2 frames of the pro's
-           on average (not for stylize, which retimes on purpose)
+  timing   the body's speed curve lines up with the pro's within 1 frame
+           (not for stylize, which retimes on purpose)
+  pose     knee and elbow bends, wrists and ankles within 15 deg of the
+           pro's on average, each joint (not for stylize)
 A clip passes a stage when every check passes. The main score is the share
 of clips that pass.
 
@@ -75,9 +78,10 @@ ATTACK_WORDS = ["attack", "slash", "cut", "combo", "stab", "swing", "strike", "p
 
 TOL = {
     "iou": 0.75, "hold_cm": 2.5, "skate_cm": 2.5, "sink_frames": 2, "float_share": 0.10,
-    "through_share": 0.05, "limit_deg": 5.0, "limit_share": 0.05, "rough_mm": 0.5, "keys_frames": 2.0,
+    "through_share": 0.05, "limit_deg": 5.0, "limit_share": 0.05, "rough_mm": 0.5, "lag_frames": 1,
+    "pose_deg": 15.0,
 }
-CHECKS = ["plants", "hold", "skate", "sink", "float", "through", "limits", "rough", "keys"]
+CHECKS = ["plants", "hold", "skate", "sink", "float", "through", "limits", "rough", "timing", "pose"]
 
 
 def run(cmd, out=None):
@@ -90,12 +94,25 @@ def run(cmd, out=None):
     return p.stdout
 
 
-def check(glb, out, clips=None):
+def check(glb, out, clips=None, keep_through=False):
+    """`motion check --tracks` into `out`. keep_through: skip the slow
+    limbs-through-the-body check and keep that part of the JSON already at
+    `out` (for re-scoring the other measures on unchanged GLBs)."""
     cmd = [CLI, "motion", "check", glb, "--tracks"]
     if clips:
         cmd += ["--clip", ",".join(clips)]
-    run(cmd, out)
-    return json.load(open(out))
+    if not keep_through:
+        run(cmd, out)
+        return json.load(open(out))
+    old = {c["name"]: c for c in json.load(open(out))["clips"]}
+    new = json.loads(run(cmd + ["--no-through"]))
+    for c in new["clips"]:
+        o = old[c["name"]]
+        if "through_body" in o:
+            c["through_body"] = o["through_body"]
+        c["detail"]["through"] = o["detail"]["through"]
+    json.dump(new, open(out, "w"))
+    return new
 
 
 def is_attack(name):
@@ -123,6 +140,30 @@ def slide(foot, a, b):
     step follows the point that was lowest on the frame before, as motion
     check's plants do (a heel-to-ball switch is not a slide)."""
     return sum(foot["step"][a + 1:b])
+
+
+def lag(a, b, n, reach=6):
+    """Frames b's curve runs behind a's (negative: ahead): the shift in
+    -reach..reach with the best correlation; None for a flat curve."""
+    if not a or not b or n < 2 * reach + 4:
+        return None
+    a, b = a[:n], b[:n]
+
+    def corr(s):
+        xs = [(a[f], b[f + s]) for f in range(max(0, -s), min(n, n - s))]
+        ma = sum(x for x, _ in xs) / len(xs)
+        mb = sum(y for _, y in xs) / len(xs)
+        va = sum((x - ma) ** 2 for x, _ in xs)
+        vb = sum((y - mb) ** 2 for _, y in xs)
+        if va < 1e-9 or vb < 1e-9:
+            return None
+        return sum((x - ma) * (y - mb) for x, y in xs) / (va * vb) ** 0.5
+    best = None
+    for s in sorted(range(-reach, reach + 1), key=abs):
+        c = corr(s)
+        if c is not None and (best is None or c > best[0] + 1e-9):
+            best = (c, s)
+    return best[1] if best else None
 
 
 def worst_rough(c):
@@ -173,7 +214,7 @@ def compare(pro, tgt, stage):
         m["through_new"] = sum(1 for f in range(n) if tt[f] and not pt[f])
     # Limits past the pro's own, same joint (by frame; retimed: past the
     # pro's worst for that joint).
-    lim = 0
+    lim, which = 0, {}
     for f in range(tgt["frames"] if retime else n):
         past = False
         for w, v in td["limits"].items():
@@ -181,8 +222,11 @@ def compare(pro, tgt, stage):
             base = (max(ref) if ref else 0.0) if retime else (ref[f] if ref and f < len(ref) else 0.0)
             if f < len(v) and v[f] > base + TOL["limit_deg"]:
                 past = True
+                which[w] = which.get(w, 0) + 1
         lim += past
     m["limits_new"] = lim
+    m["limits_which"] = which
+    m["sink_cm"] = tgt["feet"]["sink_cm"]
     m["rough_mm"] = round(worst_rough(tgt), 3)
     m["rough_pro_mm"] = round(worst_rough(pro), 3)
     # Key poses (speed minima): mean distance from each pro key to the
@@ -190,10 +234,28 @@ def compare(pro, tgt, stage):
     pk, tk = pro["read"]["keys"], tgt["read"]["keys"]
     inner = [k for k in pk if 0 < k < n - 1] or pk
     m["keys_frames"] = round(sum(min(abs(k - t) for t in tk) for k in inner) / len(inner), 2) if inner and tk else None
+    # Timing: the shift (frames) that best lines the body's speed curve up
+    # with the pro's. The key poses are that curve's minima; on a loop or
+    # an idle they are shallow and move by many frames for nothing, the
+    # curve's shift does not.
+    m["lag_frames"] = lag(pd.get("speed"), td.get("speed"), n)
+    # Pose: joint angles against the pro's (bends of knees and elbows,
+    # wrists, ankles), mean difference per joint, the worst joint.
+    worst, which_joint = 0.0, ""
+    for w, v in td.get("angles", {}).items():
+        ref = pd.get("angles", {}).get(w)
+        if not ref or w.endswith(" side") or w in ("torso", "head"):
+            continue
+        d = sum(abs(v[f] - ref[f]) for f in range(n)) / max(n, 1)
+        if d > worst:
+            worst, which_joint = d, w
+    m["pose_deg"] = round(worst, 1)
+    m["pose_joint"] = which_joint
     # Pass/fail.
     fail = []
     if retime:
-        m["plant_iou"] = m["hold_cm"] = m["hold_pro_cm"] = m["keys_frames"] = None
+        m["plant_iou"] = m["hold_cm"] = m["hold_pro_cm"] = m["keys_frames"] = m["lag_frames"] = None
+        m["pose_deg"] = None
     if m["plant_iou"] is not None and m["plant_iou"] < TOL["iou"]:
         fail.append("plants")
     if m["hold_cm"] is not None and m["hold_cm"] > m["hold_pro_cm"] + TOL["hold_cm"]:
@@ -210,8 +272,10 @@ def compare(pro, tgt, stage):
         fail.append("limits")
     if m["rough_mm"] > m["rough_pro_mm"] + TOL["rough_mm"]:
         fail.append("rough")
-    if m["keys_frames"] is not None and m["keys_frames"] > TOL["keys_frames"]:
-        fail.append("keys")
+    if m["lag_frames"] is not None and abs(m["lag_frames"]) > TOL["lag_frames"]:
+        fail.append("timing")
+    if m["pose_deg"] is not None and m["pose_deg"] > TOL["pose_deg"]:
+        fail.append("pose")
     m["fail"] = fail
     return m
 
@@ -344,6 +408,71 @@ def main_run(a):
     report(out)
 
 
+def rescore(out, only, jobs):
+    """Score a run's stage GLBs again (the through-body part kept), then
+    compare: after a change to any other measure."""
+    old = json.load(open(os.path.join(out, "results.json")))
+    work = []
+    for lib in LIBS:
+        if os.path.exists(os.path.join(out, f"pro_{lib}.json")):
+            work.append((LIBS[lib], os.path.join(out, f"pro_{lib}.json"), None, False))
+            for target in old["targets"]:
+                if only and target not in only:
+                    continue
+                for s in old["stages"]:
+                    g, js = (os.path.join(out, target, lib, f"{s}.{e}") for e in ("glb", "json"))
+                    if os.path.exists(g) and os.path.exists(js):
+                        names = [c["name"] for c in json.load(open(js))["clips"]]
+                        work.append((g, js, names, True))
+    with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
+        for f in [ex.submit(check, *w) for w in work]:
+            f.result()
+    recompare(out)
+
+
+def recompare(out):
+    """Rebuild results.json from the motion check JSONs a run left in
+    `out` (no CLI runs): for a changed check or tolerance."""
+    old = json.load(open(os.path.join(out, "results.json")))
+    results = {"commit": old["commit"], "date": old["date"], "stages": old["stages"], "tol": TOL, "targets": {}}
+    for target in old["targets"]:
+        for lib in LIBS:
+            pj = os.path.join(out, f"pro_{lib}.json")
+            if not os.path.exists(pj):
+                continue
+            pro = {c["name"]: c for c in json.load(open(pj))["clips"]}
+            for s in old["stages"]:
+                sj = os.path.join(out, target, lib, f"{s}.json")
+                if not os.path.exists(sj):
+                    continue
+                tj = json.load(open(sj))
+                T = results["targets"].setdefault(target, {"height_m": tj["height_m"], "clips": {}})
+                for c in tj["clips"]:
+                    T["clips"].setdefault(f"{lib}/{c['name']}", {})[s] = compare(pro[c["name"]], c, s)
+    json.dump(results, open(os.path.join(out, "results.json"), "w"), indent=1)
+
+
+def why(out, target, stage):
+    """Per check, the clips that fail it at a stage, with the numbers."""
+    R = json.load(open(os.path.join(out, "results.json")))
+    clips = R["targets"][target]["clips"]
+    show = {"plants": ["plant_iou"], "hold": ["hold_cm", "hold_pro_cm"], "skate": ["skate_cm", "skate_pro_cm"],
+            "sink": ["sink_new", "sink_cm"], "float": ["float_extra"], "through": ["through_new"],
+            "limits": ["limits_new", "limits_which"], "rough": ["rough_mm", "rough_pro_mm"],
+            "timing": ["lag_frames", "keys_frames"], "pose": ["pose_deg", "pose_joint"]}
+    for ch in CHECKS:
+        rows = [(n, c[stage]) for n, c in sorted(clips.items()) if stage in c and ch in c[stage]["fail"]]
+        print(f"{ch}: {len(rows)} clips")
+        for n, m in rows:
+            print(f"  {n}: " + ", ".join(f"{k} {m[k]}" for k in show[ch]))
+    labels = {}
+    for c in clips.values():
+        if stage in c:
+            for w, k in c[stage].get("limits_which", {}).items():
+                labels[w] = labels.get(w, 0) + k
+    print("limit frames past the pro's, by joint:", dict(sorted(labels.items(), key=lambda x: -x[1])))
+
+
 def report(out):
     R = json.load(open(os.path.join(out, "results.json")))
     L = [f"# Pro correctness bench ({R['commit']}, {R['date']})", "",
@@ -404,13 +533,31 @@ def main():
     r.add_argument("--jobs", type=int, default=4)
     p = sub.add_parser("report")
     p.add_argument("dir")
+    p = sub.add_parser("recompare", help="results.json again from a run's motion check JSONs, then the report")
+    p.add_argument("dir")
+    p = sub.add_parser("rescore", help="motion check again on a run's GLBs (through-body kept), then recompare")
+    p.add_argument("dir")
+    p.add_argument("--target", action="append", default=[])
+    p.add_argument("--jobs", type=int, default=4)
+    p = sub.add_parser("why", help="the clips failing each check at a stage, with numbers")
+    p.add_argument("dir")
+    p.add_argument("target")
+    p.add_argument("stage")
     a = ap.parse_args()
-    if not os.path.exists(CLI):
+    if a.cmd in ("calibrate", "run", "rescore") and not os.path.exists(CLI):
         subprocess.run(["cargo", "build", "--locked", "--release"], cwd=os.path.join(ROOT, "rust"), check=True)
     if a.cmd == "calibrate":
         calibrate(a)
     elif a.cmd == "run":
         main_run(a)
+    elif a.cmd == "recompare":
+        recompare(a.dir)
+        report(a.dir)
+    elif a.cmd == "rescore":
+        rescore(a.dir, a.target, a.jobs)
+        report(a.dir)
+    elif a.cmd == "why":
+        why(a.dir, a.target, a.stage)
     else:
         report(a.dir)
 

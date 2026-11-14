@@ -417,19 +417,39 @@ fn joint_limits_catch_backward_knees_and_elbows_only() {
     let l = bend("DEF-thigh.L", "DEF-shin.L", "DEF-foot.L", -1.0, -40.0);
     assert_eq!(l.worst, "knee.L straighter than straight", "{l:?}");
     assert!((l.worst_deg - 30.0).abs() < 0.5, "{l:?}");
-    // A wrist turned 100 degrees: 10 past.
+    // A wrist bent 100 degrees further than at rest (the hand turned in
+    // the plane of the forearm and the hand's own direction): 10 past.
+    // Twisted 100 degrees about the forearm instead (the forearm's own
+    // turn): the bend is as at rest, nothing past.
     let hand = rig.find("DEF-hand.R").unwrap();
+    let fore = rig.find("DEF-forearm.R").unwrap();
+    let kids: Vec<Vec3> = rig.children[hand].iter().map(|&c| rig.head(c)).collect();
+    let tip = kids
+        .iter()
+        .fold(Vec3::ZERO, |a, k| a + *k)
+        .scale(1.0 / kids.len() as f64);
+    let along = (rig.head(hand) - rig.head(fore)).normalized();
+    let across = along.cross(tip - rig.head(hand)).normalized();
     let mut frames = still(rig, n);
     for fr in frames.iter_mut() {
         fr[hand] = Some(turned(
             rig,
             hand,
-            Quat::from_axis_angle(fwd, 100f64.to_radians()),
+            Quat::from_axis_angle(across, 100f64.to_radians()),
         ));
     }
     let l = score(&s, "idle", &times(n), &frames, false).limits;
     assert_eq!(l.worst, "wrist.R turned too far");
     assert!((l.worst_deg - 10.0).abs() < 1e-6, "{l:?}");
+    for fr in frames.iter_mut() {
+        fr[hand] = Some(turned(
+            rig,
+            hand,
+            Quat::from_axis_angle(along, 100f64.to_radians()),
+        ));
+    }
+    let l = score(&s, "idle", &times(n), &frames, false).limits;
+    assert_eq!(l.frames, 0, "{l:?}");
 }
 
 #[test]

@@ -166,6 +166,9 @@ pub struct Subject {
     /// `height / REF_HEIGHT`.
     pub k: f64,
     pub opts: Options,
+    /// Leave out the limbs-through-the-body check (the slow one): for
+    /// re-scoring the other measures (`motion check --no-through`).
+    pub skip_through: bool,
     feet: Vec<Foot>,
     hips: usize,
     chains: Vec<(String, Vec<usize>)>,
@@ -197,6 +200,12 @@ struct Hinge {
     axis_bone: usize,
     /// +1 or -1 so that the joint's natural bend is positive.
     sign: f64,
+    /// Knees: the toe. The hinge is then across the shin and the foot's
+    /// direction on each frame (the ankle's own axis), read from joint
+    /// positions alone, so the same motion scores the same on rigs that
+    /// rest differently (a rig standing toed out read 13-17 deg more
+    /// sideways than the pros' mannequin on the same clips).
+    toe: Option<usize>,
 }
 
 /// A ball joint capped at an angle from its rest pose relative to `parent`.
@@ -205,6 +214,14 @@ struct Cap {
     node: usize,
     parent: usize,
     max_deg: f64,
+    /// Wrists and ankles: the nodes whose mean position is the end of the
+    /// hand or foot (its children; the toe). The cap is then on the bend
+    /// between the parent bone and the hand or foot, against the same bend
+    /// at rest, read from joint positions alone. A rotation from the rest
+    /// pose also counts the forearm's twist and each rig's own rest pose:
+    /// the same idle read 13 deg on the pros' mannequin and 75 on a rig
+    /// that rests with its palms turned.
+    tip: Vec<usize>,
 }
 
 impl Subject {
@@ -289,34 +306,62 @@ impl Subject {
                     axis_local: rig.rest_world[axis_bone].rotation().conj().rotate_vec(axis),
                     axis_bone,
                     sign,
+                    toe: if joint == "knee" { get("toe") } else { None },
                 });
             }
         }
         let mut caps = Vec::new();
-        let mut cap = |name: &str, node: &str, parent: &str, max_deg: f64| {
+        let mut cap = |name: &str, node: &str, parent: &str, max_deg: f64, tip: Vec<usize>| {
             if let (Some(n), Some(p)) = (map.node_of(node), map.node_of(parent)) {
                 caps.push(Cap {
                     name: name.to_string(),
                     node: n,
                     parent: p,
                     max_deg,
+                    tip,
                 });
             }
         };
-        cap("torso", "DEF-spine.003", "DEF-spine", LIMIT_TORSO_DEG);
-        cap("head", "DEF-spine.006", "DEF-spine.003", LIMIT_HEAD_DEG);
+        cap(
+            "torso",
+            "DEF-spine.003",
+            "DEF-spine",
+            LIMIT_TORSO_DEG,
+            Vec::new(),
+        );
+        cap(
+            "head",
+            "DEF-spine.006",
+            "DEF-spine.003",
+            LIMIT_HEAD_DEG,
+            Vec::new(),
+        );
         for side in ["L", "R"] {
+            let hand_tip = map
+                .node_of(&format!("DEF-hand.{side}"))
+                .map(|h| {
+                    rig.children[h]
+                        .iter()
+                        .copied()
+                        .filter(|&c| (rig.head(c) - rig.head(h)).length() > 1e-6)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             cap(
                 &format!("wrist.{side}"),
                 &format!("DEF-hand.{side}"),
                 &format!("DEF-forearm.{side}"),
                 LIMIT_WRIST_DEG,
+                hand_tip,
             );
             cap(
                 &format!("ankle.{side}"),
                 &format!("DEF-foot.{side}"),
                 &format!("DEF-shin.{side}"),
                 LIMIT_ANKLE_DEG,
+                map.node_of(&format!("DEF-toe.{side}"))
+                    .into_iter()
+                    .collect(),
             );
         }
         let shoulder_w = match (
@@ -346,6 +391,7 @@ impl Subject {
             body,
             height,
             opts: opts.clone(),
+            skip_through: false,
             feet,
             hips,
             chains,
@@ -474,6 +520,13 @@ pub struct Detail {
     pub body_lowest: Vec<f64>,
     /// Per joint limit that is ever passed: degrees past it per frame.
     pub limits: Vec<(String, Vec<f64>)>,
+    /// The body's speed (the key poses are its minima), m/s on a 1.75 m
+    /// body.
+    pub speed: Vec<f64>,
+    /// The joint angles the limits read, degrees per frame: each hinge's
+    /// bend (`knee.L flex`) and its tilt out of the hinge plane (`knee.L
+    /// side`), each ball joint's turn from rest (`wrist.L`).
+    pub angles: Vec<(String, Vec<f64>)>,
 }
 
 #[derive(Clone, Debug)]
@@ -684,32 +737,36 @@ pub fn score(
     }
 
     // Limbs through the body.
-    let through = subject.body.as_ref().map(|body| {
-        let weapon = subject.opts.weapon_in(name);
-        let arms = check_frames(body, rig, frames, weapon);
-        let mut t = ClipThrough::default();
-        let mut any = vec![false; n];
-        for a in &arms {
-            for (f, inside) in a.mesh_inside.iter().enumerate() {
-                any[f] |= *inside;
-            }
-            if a.mesh_depth / k > t.mesh_depth_m {
-                t.mesh_depth_m = a.mesh_depth / k;
-                t.worst_frame = a.worst_frame;
-            }
-            t.proxy_frames = t.proxy_frames.max(a.proxy_frames);
-            t.proxy_depth_m = t.proxy_depth_m.max(a.proxy_depth / k);
-            for c in &a.contacts {
-                if !t.contacts.contains(c) {
-                    t.contacts.push(c.clone());
+    let through = subject
+        .body
+        .as_ref()
+        .filter(|_| !subject.skip_through)
+        .map(|body| {
+            let weapon = subject.opts.weapon_in(name);
+            let arms = check_frames(body, rig, frames, weapon);
+            let mut t = ClipThrough::default();
+            let mut any = vec![false; n];
+            for a in &arms {
+                for (f, inside) in a.mesh_inside.iter().enumerate() {
+                    any[f] |= *inside;
+                }
+                if a.mesh_depth / k > t.mesh_depth_m {
+                    t.mesh_depth_m = a.mesh_depth / k;
+                    t.worst_frame = a.worst_frame;
+                }
+                t.proxy_frames = t.proxy_frames.max(a.proxy_frames);
+                t.proxy_depth_m = t.proxy_depth_m.max(a.proxy_depth / k);
+                for c in &a.contacts {
+                    if !t.contacts.contains(c) {
+                        t.contacts.push(c.clone());
+                    }
                 }
             }
-        }
-        t.contacts.sort();
-        t.mesh_frames = any.iter().filter(|x| **x).count();
-        detail.through = any;
-        t
-    });
+            t.contacts.sort();
+            t.mesh_frames = any.iter().filter(|x| **x).count();
+            detail.through = any;
+            t
+        });
 
     // Jerk.
     let hips = subject.hips;
@@ -809,6 +866,19 @@ pub fn score(
     let mut limits = LimitScore::default();
     {
         let mut past = vec![false; n];
+        let mut angles: Vec<(String, Vec<f64>)> = Vec::new();
+        let angle =
+            |angles: &mut Vec<(String, Vec<f64>)>, f: usize, what: String, deg: f64| match angles
+                .iter_mut()
+                .find(|(w, _)| *w == what)
+            {
+                Some((_, v)) => v[f] = deg,
+                None => {
+                    let mut v = vec![0.0; n];
+                    v[f] = deg;
+                    angles.push((what, v));
+                }
+            };
         let tracks = &mut detail.limits;
         let mut note = |limits: &mut LimitScore, f: usize, what: String, excess: f64| {
             if excess <= 0.0 {
@@ -839,11 +909,21 @@ pub fn score(
                 if u.length() < 1e-9 || v.length() < 1e-9 {
                     continue;
                 }
-                let axis = world[f][h.axis_bone]
+                let mut axis = world[f][h.axis_bone]
                     .rotation()
                     .rotate_vec(h.axis_local)
                     .normalized();
-                let sign = h.sign;
+                let mut sign = h.sign;
+                if let Some(toe) = h.toe {
+                    let fd = pos(f, toe) - pos(f, h.c);
+                    let across = fd.cross(v);
+                    // A foot pointed along the shin shows no axis: the
+                    // one carried by the foot bone stands in.
+                    if across.length() > 0.3 * fd.length() * v.length() {
+                        axis = across.normalized();
+                        sign = 1.0;
+                    }
+                }
                 // Bend in the hinge plane (both bones projected onto it).
                 let up = u - axis.scale(u.dot(axis));
                 let vp = v - axis.scale(v.dot(axis));
@@ -861,6 +941,8 @@ pub fn score(
                 let side = (detmath::asin(v.normalized().dot(axis).clamp(-1.0, 1.0))
                     - detmath::asin(u.normalized().dot(axis).clamp(-1.0, 1.0)))
                 .to_degrees();
+                angle(&mut angles, f, format!("{} flex", h.name), flex);
+                angle(&mut angles, f, format!("{} side", h.name), side);
                 note(
                     &mut limits,
                     f,
@@ -887,15 +969,38 @@ pub fn score(
                 }
             }
             for c in &subject.caps {
-                let rel = world[f][c.parent]
-                    .rotation()
-                    .conj()
-                    .mul(world[f][c.node].rotation());
-                let rest = rig.rest_world[c.parent]
-                    .rotation()
-                    .conj()
-                    .mul(rig.rest_world[c.node].rotation());
-                let deg = rest.angle_to(rel).to_degrees();
+                let deg = if c.tip.is_empty() {
+                    let rel = world[f][c.parent]
+                        .rotation()
+                        .conj()
+                        .mul(world[f][c.node].rotation());
+                    let rest = rig.rest_world[c.parent]
+                        .rotation()
+                        .conj()
+                        .mul(rig.rest_world[c.node].rotation());
+                    rest.angle_to(rel).to_degrees()
+                } else {
+                    // Bend between the parent bone and the hand or foot,
+                    // against the same bend at rest.
+                    let bend = |p: Vec3, j: Vec3, tip: Vec3| {
+                        let (a, b) = (j - p, tip - j);
+                        if a.length() < 1e-9 || b.length() < 1e-9 {
+                            return 0.0;
+                        }
+                        detmath::acos((a.dot(b) / (a.length() * b.length())).clamp(-1.0, 1.0))
+                            .to_degrees()
+                    };
+                    let mean = |at: &dyn Fn(usize) -> Vec3| {
+                        c.tip
+                            .iter()
+                            .fold(Vec3::ZERO, |s, &t| s + at(t))
+                            .scale(1.0 / c.tip.len() as f64)
+                    };
+                    let now = bend(pos(f, c.parent), pos(f, c.node), mean(&|t| pos(f, t)));
+                    let rest = bend(rig.head(c.parent), rig.head(c.node), mean(&|t| rig.head(t)));
+                    (now - rest).abs()
+                };
+                angle(&mut angles, f, c.name.clone(), deg);
                 note(
                     &mut limits,
                     f,
@@ -907,6 +1012,7 @@ pub fn score(
         limits.frames = past.iter().filter(|p| **p).count();
         limits.joints.sort();
         detail.limits.sort_by(|a, b| a.0.cmp(&b.0));
+        detail.angles = angles;
     }
 
     // Readability of the key poses.
@@ -914,12 +1020,10 @@ pub fn score(
         let probes: Vec<Vec<Vec3>> = (0..n)
             .map(|f| subject.probes.iter().map(|&p| pos(f, p)).collect())
             .collect();
+        let speed = crate::stylize_body::raw_speed(&probes, 1.0 / dt);
+        detail.speed = speed.iter().map(|v| v / k).collect();
         let keys = if n >= 3 {
-            crate::stylize_body::body_keys(
-                &crate::stylize_body::raw_speed(&probes, 1.0 / dt),
-                0.25,
-                3,
-            )
+            crate::stylize_body::body_keys(&speed, 0.25, 3)
         } else {
             (0..n).collect()
         };
@@ -1237,7 +1341,20 @@ pub fn check_doc(
     attack_words: &[String],
     fps: Option<f64>,
 ) -> Result<(Subject, Vec<ClipScore>), String> {
-    let subject = Subject::new(doc, opts)?;
+    check_doc_with(doc, opts, only, attack_words, fps, false)
+}
+
+/// [`check_doc`], optionally without the limbs-through-the-body check.
+pub fn check_doc_with(
+    doc: &Document,
+    opts: &Options,
+    only: &[String],
+    attack_words: &[String],
+    fps: Option<f64>,
+    skip_through: bool,
+) -> Result<(Subject, Vec<ClipScore>), String> {
+    let mut subject = Subject::new(doc, opts)?;
+    subject.skip_through = skip_through;
     let mut out = Vec::new();
     for anim in Animation::load_all(doc)? {
         if !only.is_empty() && !only.iter().any(|o| *o == anim.name) {
@@ -1426,6 +1543,10 @@ impl ClipScore {
             ),
             ("hips", Json::Arr(d.hips.iter().map(|v| p3(*v)).collect())),
             (
+                "speed",
+                Json::Arr(d.speed.iter().map(|v| Json::num(r(*v, 3))).collect()),
+            ),
+            (
                 "lowest",
                 Json::Arr(d.lowest.iter().map(|v| m(*v)).collect()),
             ),
@@ -1434,6 +1555,20 @@ impl ClipScore {
                 Json::Arr(d.body_lowest.iter().map(|v| m(*v)).collect()),
             ),
             ("through", bits(&d.through)),
+            (
+                "angles",
+                Json::Obj(
+                    d.angles
+                        .iter()
+                        .map(|(w, v)| {
+                            (
+                                w.clone(),
+                                Json::Arr(v.iter().map(|x| Json::num(r(*x, 1))).collect()),
+                            )
+                        })
+                        .collect(),
+                ),
+            ),
             (
                 "limits",
                 Json::Obj(
