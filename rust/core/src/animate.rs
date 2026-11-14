@@ -166,7 +166,11 @@ fn rest_alignment(src: &Mapped, tgt: &Mapped, name: &str, yaw: Quat) -> Quat {
         if dt.length() < 1e-9 || ds.length() < 1e-9 {
             return Quat::IDENTITY;
         }
-        return shortest_arc(dt.normalized(), ds.normalized());
+        let base = shortest_arc(dt.normalized(), ds.normalized());
+        return match name.strip_prefix("DEF-hand.") {
+            Some(side) => hand_roll(src, tgt, side, yaw, base, ds.normalized()).mul(base),
+            None => base,
+        };
     }
     // A hand whose fingers the two rigs do not share by name (a mitten
     // hand, one finger bone, sockets only): toward the middle of each
@@ -196,6 +200,37 @@ fn rest_alignment(src: &Mapped, tgt: &Mapped, name: &str, yaw: Quat) -> Quat {
         };
     }
     Quat::IDENTITY
+}
+
+/// The turn about the (aligned) hand direction `axis` that lays the
+/// target's knuckle line (index to little finger roots) on the source's,
+/// after `base` has aligned the hands' directions. A hand's direction
+/// leaves its roll free: the palm of a rig resting with its knuckles
+/// otherwise kept that difference in every frame, so a sword held in the
+/// palm pointed 24 degrees off the original Mixamo clip's on the hero.
+/// Identity unless both rigs share an index and a little or ring finger.
+fn hand_roll(src: &Mapped, tgt: &Mapped, side: &str, yaw: Quat, base: Quat, axis: Vec3) -> Quat {
+    // The same little finger on both rigs (pinky with pinky, else ring
+    // with ring), so the two lines mean the same thing.
+    let has = |m: &Mapped, f: &str| m.map.node_of(&format!("DEF-{f}.01.{side}")).is_some();
+    let Some(little) = ["f_pinky", "f_ring"]
+        .into_iter()
+        .find(|f| has(src, f) && has(tgt, f))
+    else {
+        return Quat::IDENTITY;
+    };
+    let pick = |m: &Mapped| -> Option<Vec3> {
+        let index = m.map.node_of(&format!("DEF-f_index.01.{side}"))?;
+        let little = m.map.node_of(&format!("DEF-{little}.01.{side}"))?;
+        Some(m.rig.head(index) - m.rig.head(little))
+    };
+    let (Some(lt), Some(ls)) = (pick(tgt), pick(src)) else {
+        return Quat::IDENTITY;
+    };
+    let lt = base.rotate_vec(lt);
+    let ls = yaw.rotate_vec(ls);
+    let angle = crate::keypose::fit::signed_angle(lt, ls, axis);
+    Quat::from_axis_angle(axis, angle)
 }
 
 /// Local transforms of every target node for one source frame.

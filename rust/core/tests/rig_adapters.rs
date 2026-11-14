@@ -663,3 +663,101 @@ fn standardize_keeps_each_skins_own_bind() {
         s[1].get("inverseBindMatrices").unwrap().as_usize()
     );
 }
+
+/// Hands resting with their knuckles turned differently about the hand
+/// (here the target's turned 90 degrees): the retarget lays the target's
+/// knuckle line on the source's in every frame, so a sword held in the
+/// palm points where the source's did. Aligning the hands' directions
+/// alone left the target's palm turned by the rest difference (24 degrees
+/// on the hero under a Mixamo sword clip).
+#[test]
+fn retarget_aligns_the_hands_roll_by_the_knuckle_line() {
+    use motion_core::math::Quat;
+    let rename = |doc: &mut Document, pairs: &[(&str, String)]| {
+        for node in doc.json.get_mut("nodes").unwrap().as_arr_mut().unwrap() {
+            let name = node
+                .get("name")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string();
+            if let Some((_, new)) = pairs.iter().find(|(old, _)| *old == name) {
+                node.set("name", Json::str(new));
+            }
+        }
+    };
+    // The fixture's middle finger and its extra hand bone stand in for the
+    // index and little finger roots on both rigs.
+    let mut src = humanoid(Naming::Mixamo, false, true).unwrap();
+    let mut pairs = Vec::new();
+    for side in ["Left", "Right"] {
+        pairs.push((
+            format!("mixamorig:{side}HandMiddle1"),
+            format!("mixamorig:{side}HandIndex1"),
+        ));
+        pairs.push((
+            format!("mixamorig:{side}HandPinky4"),
+            format!("mixamorig:{side}HandPinky1"),
+        ));
+    }
+    let pairs: Vec<(&str, String)> = pairs.iter().map(|(a, b)| (a.as_str(), b.clone())).collect();
+    rename(&mut src, &pairs);
+    let src = Document::parse(&src.to_bytes().unwrap()).unwrap();
+    let mut target = humanoid(Naming::Def, false, false).unwrap();
+    let mut pairs = Vec::new();
+    for side in ["L", "R"] {
+        pairs.push((
+            format!("DEF-f_middle.01.{side}"),
+            format!("DEF-f_index.01.{side}"),
+        ));
+        pairs.push((
+            format!("DEF-palm.04.{side}"),
+            format!("DEF-f_pinky.01.{side}"),
+        ));
+    }
+    let pairs: Vec<(&str, String)> = pairs.iter().map(|(a, b)| (a.as_str(), b.clone())).collect();
+    rename(&mut target, &pairs);
+    // Turn the target's little finger root 90 degrees about the hand.
+    let rig = Rig::from_doc(&target).unwrap();
+    for side in ["L", "R"] {
+        let hand = rig.find(&format!("DEF-hand.{side}")).unwrap();
+        let index = rig.find(&format!("DEF-f_index.01.{side}")).unwrap();
+        let little = rig.find(&format!("DEF-f_pinky.01.{side}")).unwrap();
+        let axis = (rig.head(index) - rig.head(hand)).normalized();
+        let off = rig.head(little) - rig.head(hand);
+        let pos = rig.head(hand) + Quat::from_axis_angle(axis, 90f64.to_radians()).rotate_vec(off);
+        let local = rig.rest_world[hand].inverse().unwrap().apply(pos);
+        let node = &mut target.json.get_mut("nodes").unwrap().as_arr_mut().unwrap()[little];
+        node.set(
+            "translation",
+            Json::Arr(vec![
+                Json::num(local.x),
+                Json::num(local.y),
+                Json::num(local.z),
+            ]),
+        );
+    }
+    let target = Document::parse(&target.to_bytes().unwrap()).unwrap();
+    let (animated, _) = retarget_clips(&target, &[("walk".into(), src.clone())], 30.0).unwrap();
+    let s = Mapped::new(&src).unwrap();
+    let t = Mapped::new(&animated).unwrap();
+    let sa = &Animation::load_all(&src).unwrap()[0];
+    let ta = &Animation::load_all(&animated).unwrap()[0];
+    let line = |m: &Mapped, w: &[Affine], side: &str| {
+        let i = m.map.node_of(&format!("DEF-f_index.01.{side}")).unwrap();
+        let p = m.map.node_of(&format!("DEF-f_pinky.01.{side}")).unwrap();
+        (w[i].t - w[p].t).normalized()
+    };
+    let mut worst: f64 = 0.0;
+    for f in [0, 7, 15, 22, 30] {
+        let time = f as f64 / 30.0;
+        let sw = s.rig.world(&sa.sample(&s.rig, time));
+        let tw = t.rig.world(&ta.sample(&t.rig, time));
+        for side in ["L", "R"] {
+            let cos = line(&s, &sw, side)
+                .dot(line(&t, &tw, side))
+                .clamp(-1.0, 1.0);
+            worst = worst.max(cos.acos().to_degrees());
+        }
+    }
+    assert!(worst < 0.5, "knuckle lines differ by {} deg", worst);
+}
