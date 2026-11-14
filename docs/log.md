@@ -446,3 +446,61 @@ compared with the pro clip frame by frame.
 raw 6, retarget 21, clean 35, clean --contact 35, stylize 0 of 5. `clean`
 removes every sink the retarget leaves (44 clips) and all skate; it is
 worse on Crouch_Fwd_Loop, Slide_Exit, Sword_Regular_B and Jump_Start.
+
+## 2026-11-13, round 7: Mixamo's sword clips against ours
+
+The test that matters for the humanoid route: Mixamo's clips untouched on
+Mixamo's own characters (X Bot for the three the game uses: Cross Slash,
+High Attack, Inward Slashing; the peasant girl for Great Sword Slash and
+Sword And Shield Slash), against the same clip after `motionforge
+animate` on the starred Andras (52 bones, fingers), Quirin's sword in a
+palm socket on both. Measured: the sword's direction per frame, original
+vs ours (`blade_track.py`, scratch).
+
+### What our copy lost, and what it did not
+
+- **Body motion: nothing.** Every bone's world rotation change matches
+  (max error 0.00002 deg); root travel kept (High Attack's 1.44 m lunge).
+- **The hand's roll: 24 deg in every frame.** `animate` aligned each
+  rest bone's direction, not its roll, so Andras's palm kept the rest
+  difference between the two rigs. Now aligned by the knuckle line
+  (index to little finger roots): 24 -> 9.7 deg on all three clips. The
+  rest is the two hands' shapes (their knuckles slant differently against
+  the hand: 8 deg), which no rigid turn removes. Known-answer test: 37 deg
+  before, under 0.5 after.
+- **No palm socket on a Mixamo rig.** `motionforge socket` looked fingers
+  up by the DEF names only; now through the name mapper (X Bot, the
+  peasant). Its palm side comes from the thumb's root (curl axes differ
+  between rigs). Andras's socket is byte-identical.
+- My reference was wrong first: Blender's exporter wrote the X Bot's
+  bone-parented socket 90 deg off its own knuckle line, which read as
+  "ours is 112 deg off". Sockets on references now come from `motionforge
+  socket`, never from Blender.
+- The default contact pass keeps the sword path (0 deg change on two
+  clips, 16 deg only on the first and last frames of Inward Slashing)
+  and halves foot sliding: skate 17.3 -> 9.4, 21.2 -> 16.3, 26.4 -> 9.5
+  cm; through-body 3 and 9 frames -> 0.
+
+What the game's current copies lose is the game's, not motionforge's:
+the hips pinned over his spot (the lunge goes), the hold from the old
+socket plus `tracks::held_pose` (blade down and into his body where the
+original holds it level), and no finger bones on `andras_rig` (an open
+hand).
+
+### Renders
+
+- Game-angle cameras now follow a clip that travels (the hips' path,
+  smoothed over 9 frames, past 0.25 m), with a faint 1 m floor checker so
+  the travel shows.
+- A rig resting off the floor in Blender (the game rig's 1 m lift) had
+  its sword drawn 1.6 times too long and at its feet: the stature is now
+  measured from the lowest bone, and a socket held through its bone takes
+  its offset from the hand in glTF.
+
+### Choosing the attacks (one-handed sword on Andras)
+
+- Keep: Sword And Shield Slash (one-handed cut, 52 frames, sword path 0
+  deg off the original), Cross Slash, High Attack (needs root motion in
+  the game), Inward Slashing.
+- Drop: Great Sword Slash (both hands on the grip, 108 frames, 1.56 m
+  travel: a two-handed move).
