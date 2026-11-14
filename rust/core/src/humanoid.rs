@@ -246,7 +246,19 @@ fn sided_base(base: &str) -> Option<String> {
     if let Some(s) = simple {
         return Some(s.to_string());
     }
-    // Fingers: optional "hand" prefix, finger word, segment digits.
+    let (finger, seg) = finger_parts(base)?;
+    if finger == "palm" {
+        return (1..=4).contains(&seg).then(|| format!("palm.{:02}", seg));
+    }
+    (1..=3)
+        .contains(&seg)
+        .then(|| format!("{}.{:02}", finger, seg))
+}
+
+/// A finger bone's canonical finger ("thumb", "f_index" ..., "palm") and
+/// its segment number, any number: optional "hand" prefix, finger word,
+/// segment digits.
+fn finger_parts(base: &str) -> Option<(&'static str, usize)> {
     let word_end = base.find(|c: char| c.is_ascii_digit())?;
     let (word, digits) = base.split_at(word_end);
     let seg: usize = digits.parse().ok()?;
@@ -261,14 +273,30 @@ fn sided_base(base: &str) -> Option<String> {
         "middle" => "f_middle",
         "ring" => "f_ring",
         "pinky" | "little" => "f_pinky",
-        "palm" => {
-            return (1..=4).contains(&seg).then(|| format!("palm.{:02}", seg));
-        }
+        "palm" => "palm",
         _ => return None,
     };
-    (1..=3)
-        .contains(&seg)
-        .then(|| format!("{}.{:02}", finger, seg))
+    Some((finger, seg))
+}
+
+/// The canonical name of a finger bone on a four-bone finger (SOMA,
+/// Kimodo's skeleton: segment 1 is the metacarpal inside the palm, 4 cm
+/// from the wrist, and 2 the knuckle): 1 is the palm bone, 2-4 the
+/// finger's three. Read as a three-bone finger (Mixamo's, whose 4 is the
+/// tip's end) the metacarpal drove the hero's knuckle bone.
+fn long_finger_base(finger: &str, seg: usize) -> Option<String> {
+    let palm = match finger {
+        "f_index" => 1,
+        "f_middle" => 2,
+        "f_ring" => 3,
+        "f_pinky" => 4,
+        _ => return None,
+    };
+    match seg {
+        1 => Some(format!("palm.{:02}", palm)),
+        2..=4 => Some(format!("{}.{:02}", finger, seg - 1)),
+        _ => None,
+    }
 }
 
 fn is_spine_word(base: &str) -> bool {
@@ -320,13 +348,29 @@ pub fn map_rig(rig: &Rig) -> Mapping {
         })
     };
     let soma_legs = |on: Side| has_base("leg", on) && has_base("shin", on);
+    // Fingers with four bones before the tip (a fourth that is not the
+    // end): the first is the metacarpal (`long_finger_base`).
+    let long_fingers: Vec<(Side, &str)> = joints
+        .iter()
+        .filter_map(|&j| {
+            let (b, s) = split_side(&rig.names[j]);
+            let (finger, seg) = finger_parts(&squash(&b))?;
+            (seg == 4 && finger.starts_with("f_") && !rig.children[j].is_empty())
+                .then_some((s?, finger))
+        })
+        .collect();
     let mut neck_candidates = Vec::new();
     for &j in &joints {
         let (base, side) = split_side(&rig.names[j]);
         let base = squash(&base);
         match side {
             Some(side) => {
-                let alias = if base == "leg" && soma_legs(side) {
+                let long = finger_parts(&base)
+                    .filter(|(f, _)| long_fingers.contains(&(side, *f)))
+                    .map(|(f, seg)| long_finger_base(f, seg));
+                let alias = if let Some(long) = long {
+                    long
+                } else if base == "leg" && soma_legs(side) {
                     Some("thigh".to_string())
                 } else {
                     sided_base(&base)
@@ -575,6 +619,53 @@ mod tests {
         let map = map_rig(&rig);
         assert_eq!(map.canonical_of(1), Some("DEF-thigh.L"));
         assert_eq!(map.canonical_of(2), Some("DEF-shin.L"));
+    }
+
+    /// SOMA's fingers have four bones before the end (the first the
+    /// metacarpal): 1 is the palm bone, 2-4 the finger. Mixamo's four
+    /// (the fourth the tip's end) stay 1-3; so does SOMA's thumb.
+    #[test]
+    fn soma_finger_one_is_the_metacarpal() {
+        let soma = [
+            "LeftHand",
+            "LeftHandIndex1",
+            "LeftHandIndex2",
+            "LeftHandIndex3",
+            "LeftHandIndex4",
+            "LeftHandIndexEnd",
+            "LeftHandThumb1",
+            "LeftHandThumb2",
+        ];
+        let parents = [
+            None,
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(0),
+            Some(6),
+        ];
+        let map = map_rig(&rig_of(&soma, &parents));
+        assert_eq!(map.canonical_of(1), Some("DEF-palm.01.L"));
+        assert_eq!(map.canonical_of(2), Some("DEF-f_index.01.L"));
+        assert_eq!(map.canonical_of(4), Some("DEF-f_index.03.L"));
+        assert_eq!(map.canonical_of(5), None);
+        assert_eq!(map.canonical_of(6), Some("DEF-thumb.01.L"));
+        let mixamo = [
+            "LeftHand",
+            "LeftHandIndex1",
+            "LeftHandIndex2",
+            "LeftHandIndex3",
+            "LeftHandIndex4",
+        ];
+        let map = map_rig(&rig_of(
+            &mixamo,
+            &[None, Some(0), Some(1), Some(2), Some(3)],
+        ));
+        assert_eq!(map.canonical_of(1), Some("DEF-f_index.01.L"));
+        assert_eq!(map.canonical_of(3), Some("DEF-f_index.03.L"));
+        assert_eq!(map.canonical_of(4), None);
     }
 
     #[test]
