@@ -504,3 +504,29 @@ hand).
   the game), Inward Slashing.
 - Drop: Great Sword Slash (both hands on the grip, 108 frames, 1.56 m
   travel: a two-handed move).
+
+## 2026-11-14, round 8: Kimodo 1.2 seeds against mocap
+
+93 takes of the ten combat prompts (8 seeds each, plus 12 with no root
+path) and 24 testing length and wording, each retargeted onto the starred
+Andras and scored as in round 7.
+
+- **Copy: as faithful as mocap.** Body 0.00002 deg; the sword 7-11 deg off
+  its source (mocap 10-12).
+- **Fixed: SOMA's fingers.** Four bones per finger, the first the
+  metacarpal (4 cm from the wrist); the mapper read it as the knuckle
+  bone, so every Kimodo clip drove the hero's finger roots with
+  metacarpal motion. Now the palm bone; Mixamo output byte-identical.
+- **Swing speed over 0.1 s** (single frames have one-frame snaps of
+  2300-3500 deg/s): diagonal slash 1471 vs mocap 1498; cross swing at
+  most 800 vs 1636 (median 347); monster attacks and hits as fast as or
+  faster than mocap, feet sliding 0-5 cm.
+- **Not ours:** the root path pinned on every frame (no-path medians
+  1573->1198, 408->327, 775->945 deg/s), clip length (double: 347->400
+  and 661->333, feet 9->23 cm), wording ("a person": 266, 326).
+- **The thrust**, the one move mocap doesn't give us: no take points the
+  blade ahead at full reach (best 0.37; a thrust is 1). The arm reaches
+  with a neutral wrist, so a hammer grip points the blade up: the model
+  doesn't know a sword is in the hand. `motionforge attack --preset
+  thrust`: blade 0.99 ahead at 0.40 m reach, feet 3.8 cm, nothing
+  through the body.
