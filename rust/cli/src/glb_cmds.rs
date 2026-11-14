@@ -1034,8 +1034,23 @@ pub fn cmd_attack(cmd: &Cmd) -> CmdResult {
     let prefix = cmd.get("prefix").unwrap_or("");
     let mut r = String::from("=== motionforge attack ===\n");
     let mut reports = Vec::new();
+    let fist = match cmd.get("grips") {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| (2, format!("{path}: {e}")))?;
+            motion_core::attack::grip::parse_grips(&text, "fist").map_err(|e| (2, e))?
+        }
+        None => Vec::new(),
+    };
     for text in &specs {
-        let spec = parse_spec(text).map_err(|e| (2, e))?;
+        let mut spec = parse_spec(text).map_err(|e| (2, e))?;
+        spec.fist = fist.clone();
+        if let Some(c) = cmd.get("close") {
+            spec.close = c
+                .parse::<f64>()
+                .ok()
+                .filter(|v| (0.0..=1.5).contains(v))
+                .ok_or((1, "--close must be 0..1.5".to_string()))?;
+        }
         let name = match (cmd.get("name"), specs.len()) {
             (Some(n), 1) => n.to_string(),
             _ => format!("{}{}", prefix, spec.name),

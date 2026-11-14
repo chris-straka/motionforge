@@ -384,3 +384,24 @@ bodies, two of them professionally rigged, read the same). Method changed:
   values derived from the sword path when a key leaves them out; the
   owner's picks to calibrate the score; Kimodo seeds as the rival when f
   has room.
+
+## 2026-11-13, round 6: grip, weight, phone clips (attack tool)
+
+The owner on round 5's authored attacks: "clearly sword attacks. They
+need refinement. And he's not holding the sword properly". Kept, on the
+same tool (`docs/attack.md`, "Round 2"):
+
+- **Grip from the hand**: handle across the palm, fingers at 0.9 of the
+  hero's own fist (hand-tools grips), socket rewritten into the palm.
+  Tried first: closing each finger until it touches the handle; it
+  stopped at once (straight fingers already lie within touch of a handle
+  under the knuckles): dropped for the fixed share.
+- **Overlap**: hips 35% early, chest 20% early, sword 20% late. Hips now
+  peak a frame before the tip at 730-1,060 deg/s (pros 0-2 frames,
+  700-1,700); a 7-frame hold after the strike (pros 1-15).
+- **Phone clips**: tall, figure-filling, close then game camera, normal
+  then slow. Fitting the camera to a sphere round the sword's sweep left
+  the figure at a third of the height; fitted to the body's projected
+  extents instead.
+- Cost: the wrist limit is passed on 17-22 frames per attack (palm
+  grip); backcut's arm still crosses the chest (8 frames).

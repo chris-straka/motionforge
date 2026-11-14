@@ -112,6 +112,64 @@ Where the numbers fall short:
   stretched out behind over a flat foot).
 - The readability score is not yet checked against the owner's own picks.
 
+## Round 2 (2026-11-13): the grip, weight, phone clips
+
+The owner on round 1: "clearly sword attacks. They need refinement. And
+he's not holding the sword properly (maybe not gripping it at all)".
+
+**The grip** (`attack/grip.rs`). The game's hold constants
+(`tracks::held_pose`) put the handle across the back of the wrist on a
+hero with real hands, the hand open. On a hand with finger bones the
+hold now comes from the hand: the handle across the palm under the
+knuckles, from the little finger's side out past the index (a hammer
+grip, canted 0.25 toward the fingers), a handle's and a finger's
+thickness to the palm side; the fingers close to 0.9 of the fist
+(`--grips` reads a hand-tools `grips.ron` for the fist's bend per joint:
+the starred hero's); the thumb comes round. Closing "until a finger
+touches the handle" stopped at once (straight fingers already lie within
+touching distance of a handle under the knuckles), so the default is the
+fixed share, checked close up on the hero (`--cam hand`). The hand socket
+is rewritten into the palm (origin at the grip's middle, +Y the blade),
+so a sword hung on it with no offset sits in the fist (`motion check
+--blade-pose socket` reads it that way). A hand without finger bones
+keeps the game's hold and its socket (test). The free hand curls 0.35
+of a fist, 0.85 on the hilt.
+
+**Weight: the hips lead, the blade lags, then snaps.** Each move's keys
+are reached on three clocks: the hips (and feet) finish 35% early, the
+chest 20% early, the sword starts 20% late and catches up; all land on
+the key together (test). Measured frame by frame against the six pro
+attacks (the frame each part turns fastest, against the tip's fastest):
+
+| | hips fastest, frames before the tip | hips turn speed | still after the strike |
+|---|---|---|---|
+| pro clips (6) | 0-2 (one 11) | 700-1,700 deg/s | 1-15 frames |
+| round 1 (no overlap) | 0 | 510-650 deg/s | 4-5 |
+| round 2 | 1 | 730-1,060 deg/s | 7 |
+
+The hips turn further through the strike (windup 45-60 deg the other
+way, follow-through 55-65 deg), the follow-through holds 0.3 s (pros:
+up to 0.5 s), the recovery ends on a 0.1 s hold in the ready pose, and
+the ready pose holds the sword at the waist pointing forward (it had
+stood up in front of his face once the palm turned the blade).
+
+| clip (round 2, starred hero) | readability | body change | tip arc | skate / sink / float | through body | past a limit |
+|---|---|---|---|---|---|---|
+| sweep | 0.78 | 0.72 | 2.25 x 1.00 | 0 / 0 / 0 | 0 | 22 fr (wrist 26 deg) |
+| backcut | 0.75 | 0.75 | 2.21 x 0.89 | 0 / 0 / 0 | 8 fr, 11 cm | 19 fr (wrist 30 deg) |
+| cleave | 0.72 | 0.79 | 2.32 x 0.78 | 0 / 0 / 0 | 1 fr, 2 cm | 17 fr (back ankle 24 deg) |
+
+The palm grip bends the wrist further than the old hold: the wrist limit
+is passed on 17-22 frames per attack (the pros: 10-107 frames). By eye
+(close on the hand) the hand reads as gripping through the swing.
+
+**Clips the owner can read on a phone** (`tools/bench/phone_clip.py`,
+the standard for every motion clip sent to the owner): 720x1080, the
+figure fitted to about 80% of the height over the whole move (the blade
+may leave the frame at full stretch), the close 3/4 view first, then the
+game camera's angle (`--cam gamefit`: its direction and pitch, moved
+in), each once at speed and once at 0.4 speed, labelled.
+
 ## Tests
 
 `core/tests/attack.rs` on the procedural fixture: the grip is on each

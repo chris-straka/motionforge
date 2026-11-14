@@ -153,3 +153,41 @@ fn eases_start_end_and_keep_their_middles_visible() {
     assert!(Ease::In.at(1.0 / 3.0) > 0.19);
     assert!((Ease::In.at(0.3) + Ease::Out.at(0.7) - 1.0).abs() < 1e-12);
 }
+
+#[test]
+fn a_hand_without_fingers_keeps_the_games_hold_and_its_socket() {
+    // The procedural fixture has no finger bones: no palm hold, the
+    // socket is not moved, no finger channels are written.
+    let doc = target();
+    let info = RigInfo::new(&doc).unwrap();
+    assert!(motion_core::attack::grip::palm_hold(&info, 1, 1.0).is_none());
+    let spec = parse_spec(EASY).unwrap();
+    let (out, rep) = build(&doc, &spec, None).unwrap();
+    assert!(!rep.socket_rewritten);
+    let sock = info.socket[1].unwrap();
+    assert_eq!(
+        format!("{:?}", out.array("nodes")[sock]),
+        format!("{:?}", doc.array("nodes")[sock])
+    );
+}
+
+#[test]
+fn overlap_puts_the_hips_ahead_and_the_sword_behind_landing_together() {
+    let spec = parse_spec(EASY).unwrap();
+    assert_eq!(spec.lead, [0.35, 0.2, 0.2]);
+    let (params, at) = spec.frames();
+    // Half-way through the strike (windup key -> strike key), the hips
+    // have turned further than an even share and the sword less far; on
+    // the key all are there.
+    let (w, s) = (at[1], at[2]);
+    let mid = w + 3 + (s - w - 3) / 2; // past the windup's hold
+    let k = &spec.keys;
+    let hips_share = (params[mid].body.turn - k[1].body.turn) / (k[2].body.turn - k[1].body.turn);
+    let grip_share = (params[mid].grip - k[1].grip).length() / (k[2].grip - k[1].grip).length();
+    assert!(
+        hips_share > grip_share + 0.2,
+        "{hips_share} vs {grip_share}"
+    );
+    assert!((params[s].body.turn - k[2].body.turn).abs() < 1e-12);
+    assert!((params[s].grip - k[2].grip).length() < 1e-12);
+}

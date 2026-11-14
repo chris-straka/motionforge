@@ -37,6 +37,7 @@
 //! y up, z forward, from the floor under his standing hips. Angles are
 //! degrees; a positive turn is to his left.
 
+pub mod grip;
 pub mod ik;
 
 use crate::contact::hinge_axis;
@@ -58,6 +59,16 @@ const UP: Vec3 = Vec3 {
 pub const BLADE_HEIGHTS: f64 = 0.91 / 2.0;
 /// The hand may turn this far from its forearm, degrees.
 pub const WRIST_MAX_DEG: f64 = 50.0;
+/// Default overlap (`Spec::lead`): the hips finish each move this share
+/// early, the chest this share early, the sword starts this share late.
+/// Professional attacks turn the hips first and the blade last (measured
+/// in `docs/attack.md`).
+pub const HIPS_LEAD: f64 = 0.35;
+pub const CHEST_LEAD: f64 = 0.2;
+pub const BLADE_LAG: f64 = 0.2;
+/// How far a sword hand with finger bones closes, share of a fist: the
+/// fingers wrap the props kit's handle (checked close up on the hero).
+pub const GRIP_CLOSE: f64 = 0.9;
 /// How far the heel comes up in a pivot, degrees.
 pub const PIVOT_HEEL_DEG: f64 = 10.0;
 /// A forearm rolls this far either way, degrees.
@@ -158,6 +169,16 @@ pub struct Spec {
     /// How high a stepping foot lifts, heights.
     pub step: f64,
     pub keys: Vec<Key>,
+    /// A fist's bend per finger joint (a hand-tools grips file's `fist`);
+    /// empty: a default fist.
+    pub fist: Vec<(String, f64)>,
+    /// How far the sword hand closes, share of that fist (0 = find where
+    /// the fingers touch the handle).
+    pub close: f64,
+    /// Overlap: the share of each move the hips arrive early by, the
+    /// chest early by, and the sword starts late by (it then catches up:
+    /// the snap). All three land on the key together.
+    pub lead: [f64; 3],
 }
 
 fn num(j: Option<&Json>, what: &str) -> Result<Option<f64>, String> {
@@ -334,6 +355,13 @@ pub fn parse_spec(text: &str) -> Result<Spec, String> {
         blade,
         step: num(j.get("step"), "step")?.unwrap_or(0.07),
         keys,
+        fist: Vec::new(),
+        close: num(j.get("close"), "close")?.unwrap_or(GRIP_CLOSE),
+        lead: [
+            num(j.get("hips_lead"), "hips_lead")?.unwrap_or(HIPS_LEAD),
+            num(j.get("chest_lead"), "chest_lead")?.unwrap_or(CHEST_LEAD),
+            num(j.get("blade_lag"), "blade_lag")?.unwrap_or(BLADE_LAG),
+        ],
     })
 }
 
@@ -376,18 +404,26 @@ impl Spec {
         (self.keys[k + 1].grip - self.keys[k - 1].grip).scale(0.5)
     }
 
-    /// Values `e` (0..1, already eased) of the way from key `i` to `i+1`.
+    /// Values `e` (0..1, already eased) of the way from key `i` to `i+1`,
+    /// everything together.
     pub fn at(&self, i: usize, e: f64) -> Params {
+        self.at_parts(i, [e, e, e])
+    }
+
+    /// Values from key `i` toward `i+1` with the hips, the chest and the
+    /// sword each `e[0]`, `e[1]`, `e[2]` of the way (overlap).
+    pub fn at_parts(&self, i: usize, e3: [f64; 3]) -> Params {
+        let (eh, ec, e) = (e3[0], e3[1], e3[2]);
         let (a, b) = (&self.keys[i], &self.keys[(i + 1).min(self.keys.len() - 1)]);
         let body = Body {
-            turn: lerp(a.body.turn, b.body.turn, e),
-            drop: lerp(a.body.drop, b.body.drop, e),
-            shift_x: lerp(a.body.shift_x, b.body.shift_x, e),
-            shift_z: lerp(a.body.shift_z, b.body.shift_z, e),
-            twist: lerp(a.body.twist, b.body.twist, e),
-            lean: lerp(a.body.lean, b.body.lean, e),
-            side: lerp(a.body.side, b.body.side, e),
-            head: lerp(a.body.head, b.body.head, e),
+            turn: lerp(a.body.turn, b.body.turn, eh),
+            drop: lerp(a.body.drop, b.body.drop, eh),
+            shift_x: lerp(a.body.shift_x, b.body.shift_x, eh),
+            shift_z: lerp(a.body.shift_z, b.body.shift_z, eh),
+            twist: lerp(a.body.twist, b.body.twist, ec),
+            lean: lerp(a.body.lean, b.body.lean, ec),
+            side: lerp(a.body.side, b.body.side, ec),
+            head: lerp(a.body.head, b.body.head, eh),
         };
         // Hermite through the grips.
         let (m0, m1) = (self.tangent(i), self.tangent(i + 1));
@@ -405,13 +441,14 @@ impl Spec {
         let mut feet = [Foot::default(); 2];
         let mut lift = [0.0; 2];
         for s in 0..2 {
+            // The feet go with the hips (a step leads the swing).
             feet[s] = Foot {
-                dx: lerp(a.feet[s].dx, b.feet[s].dx, e),
-                dz: lerp(a.feet[s].dz, b.feet[s].dz, e),
-                yaw: lerp(a.feet[s].yaw, b.feet[s].yaw, e),
-                heel: lerp(a.feet[s].heel, b.feet[s].heel, e),
+                dx: lerp(a.feet[s].dx, b.feet[s].dx, eh),
+                dz: lerp(a.feet[s].dz, b.feet[s].dz, eh),
+                yaw: lerp(a.feet[s].yaw, b.feet[s].yaw, eh),
+                heel: lerp(a.feet[s].heel, b.feet[s].heel, eh),
             };
-            let arc = detmath::sin(std::f64::consts::PI * e);
+            let arc = detmath::sin(std::f64::consts::PI * eh);
             if a.feet[s].dx != b.feet[s].dx || a.feet[s].dz != b.feet[s].dz {
                 // A foot whose place changes steps.
                 lift[s] = self.step * arc;
@@ -443,7 +480,14 @@ impl Spec {
             let b = &self.keys[i + 1];
             let n = ((b.t * self.fps).round() as usize).max(1);
             for j in 1..=n {
-                out.push(self.at(i, b.ease.at(j as f64 / n as f64)));
+                let u = j as f64 / n as f64;
+                // Hips and chest arrive early, the sword starts late and
+                // catches up: each on its own clock, all on the key at u=1.
+                let early = |lead: f64| b.ease.at((u / (1.0 - lead).max(0.05)).min(1.0));
+                let late = b
+                    .ease
+                    .at(((u - self.lead[2]) / (1.0 - self.lead[2]).max(0.05)).max(0.0));
+                out.push(self.at_parts(i, [early(self.lead[0]), early(self.lead[1]), late]));
             }
             at.push(out.len() - 1);
             for _ in 0..hold(b) {
@@ -487,6 +531,13 @@ pub struct Solver<'a> {
     pub origin: Vec3,
     side: usize,
     hold: [Option<Hold>; 2],
+    /// Where the handle sits in the sword hand when it has finger bones.
+    pub palm: Option<grip::PalmHold>,
+    /// Finger locals: the sword hand closed on the handle; the free hand
+    /// relaxed, and closed (on the hilt).
+    grip_fingers: Vec<(usize, Trs)>,
+    free_fingers: Vec<(usize, Trs)>,
+    fist_fingers: Vec<(usize, Trs)>,
     arm_axis: [Option<Vec3>; 2],
     leg_axis: [Option<Vec3>; 2],
 }
@@ -528,6 +579,25 @@ impl<'a> Solver<'a> {
                 ["L", "R"][spec.side]
             ));
         }
+        // A hand with finger bones holds the handle in its palm (`grip.rs`),
+        // not where the game's socket constants put it.
+        let palm = grip::palm_hold(info, spec.side, unit);
+        if let (Some(ph), Some(h)) = (palm, hold[spec.side].as_mut()) {
+            h.blade = ph.blade;
+            h.grip = ph.grip;
+        }
+        let fist = |n: &str| spec.fist.iter().find(|(k, _)| k == n).map(|(_, v)| *v);
+        let other = 1 - spec.side;
+        let grip_fingers = grip::fingers(
+            info,
+            spec.side,
+            palm.as_ref(),
+            (spec.close > 0.0).then_some(spec.close),
+            unit,
+            &fist,
+        );
+        let free_fingers = grip::fingers(info, other, None, Some(grip::RELAXED), unit, &fist);
+        let fist_fingers = grip::fingers(info, other, None, Some(0.85), unit, &fist);
         let ax = |a: usize, b: usize, c: usize| hinge_axis(rig, a, b, c);
         Ok(Solver {
             info,
@@ -535,6 +605,10 @@ impl<'a> Solver<'a> {
             origin: Vec3::new(hips.x, info.ground, hips.z),
             side: spec.side,
             hold,
+            palm,
+            grip_fingers,
+            free_fingers,
+            fist_fingers,
             arm_axis: [
                 ax(info.upper[0], info.fore[0], info.hand[0]),
                 ax(info.upper[1], info.fore[1], info.hand[1]),
@@ -868,6 +942,19 @@ impl<'a> Solver<'a> {
         if self.hold[other].is_some() {
             self.place_hand(&mut l, other, ta.lerp(tb, e), dir, chest_yaw, on_hilt);
         }
+        // Fingers: the sword hand closed on the handle; the free hand
+        // relaxed, or closed round the hilt.
+        for (n, t) in &self.grip_fingers {
+            l[*n] = Some(*t);
+        }
+        let hilt = (oa == Off::Grip) as u8 as f64 * (1.0 - e) + (ob == Off::Grip) as u8 as f64 * e;
+        for ((n, a), (_, b)) in self.free_fingers.iter().zip(&self.fist_fingers) {
+            l[*n] = Some(Trs {
+                t: a.t,
+                r: a.r.slerp(b.r, hilt).normalized(),
+                s: a.s,
+            });
+        }
         crate::helpers::drive(rig, &mut l);
         (l, miss)
     }
@@ -886,6 +973,8 @@ pub struct Report {
     /// Worst of each miss over the clip, and the frame of the worst grip.
     pub worst: Miss,
     pub worst_grip_frame: usize,
+    /// The hand socket was moved into the palm (a hand with fingers).
+    pub socket_rewritten: bool,
 }
 
 impl Report {
@@ -918,6 +1007,7 @@ impl Report {
             ("blade_off_deg", r(self.worst.blade_deg, 10.0)),
             ("hips_lowered_heights", r(self.worst.drop, 1e3)),
             ("foot_miss_heights", r(self.worst.foot, 1e4)),
+            ("socket_in_palm", Json::Bool(self.socket_rewritten)),
         ])
     }
 }
@@ -960,6 +1050,7 @@ pub fn solve(
         key_miss,
         worst,
         worst_grip_frame,
+        socket_rewritten: false,
     };
     Ok((times, frames, report))
 }
@@ -979,6 +1070,19 @@ pub fn build(
     let mut nodes = info.rig.joints();
     nodes.sort_unstable();
     nodes.dedup();
+    // The hand socket holds the sword where the hand does (`grip.rs`): its
+    // origin at the grip's middle, +Y along the blade, so a sword hung on
+    // it with no offset sits in the fist.
+    let solver = Solver::new(&info, spec)?;
+    if let (Some(ph), Some(sock)) = (solver.palm, info.socket[spec.side]) {
+        let hw = info.rig.rest_world[info.hand[spec.side]];
+        let world = hw.t + hw.rotation().rotate_vec(ph.grip);
+        let inv = hw.inverse().ok_or("hand has a singular transform")?;
+        let node = &mut out.array_mut("nodes")[sock];
+        let (_, _, sc) = crate::glb::node_trs(node);
+        crate::glb::set_node_trs(node, inv.apply(world), ph.socket, sc);
+        report.socket_rewritten = true;
+    }
     let anim =
         crate::stylize_body::encode_clip(&mut out, &info.rig, &name, &times, &nodes, &frames);
     let list = out.array_mut("animations");

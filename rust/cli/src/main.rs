@@ -60,6 +60,7 @@ retarget flags:\n\
 attack flags:\n\
   --rig <rigged glb> --output <glb>  --preset cleave|backcut|sweep|thrust|all (repeatable)  --spec <json> (repeatable)\n\
   --name <clip> (one spec)  --prefix <p> (clip names)  --report <json>\n\
+  --grips <hand-tools grips.ron> (the fist's finger bends; a hand with fingers holds the handle in its palm)\n\
 \n\
 clean flags:\n\
   --input <rigged glb> --output <glb>  --clip <name> (repeatable; default all)\n\
