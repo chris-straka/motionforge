@@ -30,8 +30,9 @@ facing at spawn); perspective, 75 deg vertical field of view, 16:9
 shoulder as when locked on (0.85 m right, 0.25 m up, looking 0.6 of the
 way right). "close" is a 3/4 front view (30 deg toward his right hand,
 10 deg down, 34 deg lens: `run_clip.rs`'s lens for moving clips) framing
-the whole clip. The camera does not move during a clip: the game's
-follows his root, and these clips keep the root still.
+the whole clip. The camera stays put during a clip unless his hips
+travel more than FOLLOW_MIN across the floor (a lunge); then the game,
+lock and gamefit cameras ride along his path, as the game's follows him.
 
 Look: the character's own painted materials, a plain floor, one soft sun
 from the camera's side (55 deg up, 45 deg left of the view, 3 deg wide)
@@ -96,7 +97,11 @@ def stature_unit(arm):
     if not st or head is None:
         return 1.0
     bpy.context.view_layer.update()
-    y = (arm.matrix_world @ head.head_local).z
+    # From the lowest bone, not z = 0: the game rig rests 1 m up in
+    # Blender, which made its sword 1.6 times too long.
+    low = min(min((arm.matrix_world @ b.head_local).z, (arm.matrix_world @ b.tail_local).z)
+              for b in arm.data.bones)
+    y = (arm.matrix_world @ head.head_local).z - low
     return st * (1.6836 / 2.0) / y if y > 1e-3 else 1.0
 
 
@@ -204,7 +209,17 @@ def attach_prop(arm, glb, spec, pose):
         rest = holder_world(arm, socket)
     arm.data.pose_position = 'POSE'
     bpy.context.view_layer.update()
-    corr = rest.inverted() @ (CONV @ gltf_node_world(glb, socket))
+    if via_bone:
+        # The socket from the hand in glTF, carried on the bone. The hand's
+        # glTF frame from the bone's is a turn only: the bone's head is the
+        # node's origin, wherever Blender put a root's offset (the game
+        # rig's 1 m lift counted twice put the sword at his feet).
+        wh = gltf_node_world(glb, hand)
+        frame = rest.inverted() @ (CONV @ wh)
+        frame.translation = (0, 0, 0)
+        corr = frame @ (wh.inverted() @ gltf_node_world(glb, socket))
+    else:
+        corr = rest.inverted() @ (CONV @ gltf_node_world(glb, socket))
     keep_offset = via_bone
     # The bone's head is the node's origin: keep only the axes (a root
     # node's offset, such as the game rig's 1 m lift, is not always where
@@ -274,7 +289,36 @@ def facing(arm):
     return d.normalized() if d.length > 1e-6 else Vector((0, -1, 0))
 
 
-def clip_points(arm, meshes, f0, f1):
+FOLLOW_MIN = 0.25  # m of root travel before the camera follows
+
+
+def root_path(arm, f0, f1):
+    """Per frame, how far his hips have moved across the floor since the
+    clip's first frame, smoothed over 9 frames (the game's camera follows
+    his root, not the hips' sway); None when they travel less than
+    FOLLOW_MIN (the camera then stays put)."""
+    scn = bpy.context.scene
+    pb = arm.pose.bones
+    hips = pb.get("DEF-spine") or next((b for b in pb if b.parent is None and b.children), None)
+    if hips is None:
+        return None
+    raw = []
+    for f in range(f0, f1 + 1):
+        scn.frame_set(f)
+        p = arm.matrix_world @ hips.head
+        raw.append(Vector((p.x, p.y, 0.0)))
+    scn.frame_set(f0)
+    raw = [r - raw[0] for r in raw]
+    if max(r.length for r in raw) < FOLLOW_MIN / stature_unit(arm):
+        return None
+    out = []
+    for i in range(len(raw)):
+        win = raw[max(0, i - 4):i + 5]
+        out.append(sum(win, Vector()) / len(win))
+    return {f0 + i: v - out[0] for i, v in enumerate(out)}
+
+
+def clip_points(arm, meshes, f0, f1, path=None):
     """Corners of every mesh's posed bounding box, over the clip (every
     other frame). A held prop does not count when the body is there: the
     frame is fitted to the figure, and the blade may leave it at full
@@ -290,7 +334,8 @@ def clip_points(arm, meshes, f0, f1):
             ev = o.evaluated_get(dg)
             vs = ev.data.vertices
             step = max(1, len(vs) // 400)
-            pts += [ev.matrix_world @ vs[i].co for i in range(0, len(vs), step)]
+            back = path[f] if path else Vector()
+            pts += [ev.matrix_world @ vs[i].co - back for i in range(0, len(vs), step)]
     scn.frame_set(f0)
     if SPEC.get("debug"):
         dg = bpy.context.evaluated_depsgraph_get()
@@ -302,12 +347,12 @@ def clip_points(arm, meshes, f0, f1):
     return pts
 
 
-def fit_view(arm, meshes, f0, f1, view, up, fov):
+def fit_view(arm, meshes, f0, f1, view, up, fov, path=None):
     """Eye and look point along `view` that fit the figure over the clip
     (the move's projected extents, not a sphere round it) to about 80%
     of the frame's height; the blade may reach past the sides at full
     stretch."""
-    pts = clip_points(arm, meshes, f0, f1) + [Vector((q.x, q.y, 0.0)) for q in clip_points(arm, meshes, f0, f0)]
+    pts = clip_points(arm, meshes, f0, f1, path) + [Vector((q.x, q.y, 0.0)) for q in clip_points(arm, meshes, f0, f0)]
     cr = view.cross(up).normalized()
     cu = cr.cross(view).normalized()
     c0 = sum(pts, Vector()) / len(pts)
@@ -336,6 +381,9 @@ def place_camera(arm, meshes, f0, f1):
     origin = arm.matrix_world.translation.copy()
     origin.z = 0.0
     kind = SPEC.get("cam", "game")
+    # The game's camera follows him: on a clip that travels (a lunge) the
+    # game-angle cameras ride along his path.
+    path = root_path(arm, f0, f1) if kind in ("game", "lock", "gamefit") else None
     if kind in ("game", "lock"):
         yaw = math.radians(SPEC.get("yaw_deg", 0.0))
         look_dir = fwd * math.cos(yaw) + right * math.sin(yaw)
@@ -359,7 +407,7 @@ def place_camera(arm, meshes, f0, f1):
         p = -GAME_PITCH
         view = (-look_dir * math.cos(p) + up * math.sin(p)).normalized()
         fov = math.radians(30)
-        look, eye = fit_view(arm, meshes, f0, f1, view, up, fov)
+        look, eye = fit_view(arm, meshes, f0, f1, view, up, fov, path)
         cam.data.angle_y = fov
     elif kind == "hand":
         # Close on the sword hand, from his front right and a little above,
@@ -411,6 +459,13 @@ def place_camera(arm, meshes, f0, f1):
               "hips", hips and tuple(round(x, 3) for x in hips), "eye", tuple(round(x, 3) for x in eye))
     cam.location = eye
     cam.rotation_euler = (look - eye).to_track_quat('-Z', 'Y').to_euler()
+    if path:
+        rider = bpy.data.objects.new("follow", None)
+        scn.collection.objects.link(rider)
+        for f, v in path.items():
+            rider.location = v
+            rider.keyframe_insert("location", frame=f)
+        cam.parent = rider
     scn.camera = cam
     return cam, fwd, (look - eye).normalized()
 
@@ -432,7 +487,18 @@ def light_and_floor(view_dir):
     bpy.ops.mesh.primitive_plane_add(size=80, location=(0, 0, 0))
     floor = bpy.context.active_object
     floor.name = "floor"
-    floor.data.materials.append(plain_mat("floor", (0.36, 0.36, 0.34)))
+    mat = plain_mat("floor", (0.36, 0.36, 0.34))
+    # A faint 1 m checker, so a following camera still shows him travel.
+    nt = mat.node_tree
+    chk = nt.nodes.new("ShaderNodeTexChecker")
+    chk.inputs["Scale"].default_value = 80.0
+    chk.inputs["Color1"].default_value = (0.36, 0.36, 0.34, 1)
+    chk.inputs["Color2"].default_value = (0.325, 0.325, 0.31, 1)
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    nt.links.new(tc.outputs["Generated"], chk.inputs["Vector"])
+    bsdf = next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED')
+    nt.links.new(chk.outputs["Color"], bsdf.inputs["Base Color"])
+    floor.data.materials.append(mat)
     scn.world = scn.world or bpy.data.worlds.new("w")
     scn.world.use_nodes = True
     bg = next(n for n in scn.world.node_tree.nodes if n.type == 'BACKGROUND')
